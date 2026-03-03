@@ -19,21 +19,48 @@ function verifyTelegramAuth(data: any, botToken: string) {
   return hmac === data.hash;
 }
 
-router.post('/telegram', (req, res) => {
-  const { authData, inviteCode } = req.body;
+function verifyTelegramWebApp(initData: string, botToken: string) {
+  const urlParams = new URLSearchParams(initData);
+  const hash = urlParams.get('hash');
+  urlParams.delete('hash');
+  
+  const dataCheckString = Array.from(urlParams.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+    
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+  const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  
+  return calculatedHash === hash;
+}
 
-  let isValid = false;
-  if (TELEGRAM_BOT_TOKEN) {
-    isValid = verifyTelegramAuth(authData, TELEGRAM_BOT_TOKEN);
-  } else if (process.env.NODE_ENV !== 'production') {
-    // Dev bypass if no token is provided
-    isValid = true;
+router.post('/telegram-webapp', (req, res) => {
+  const { initData, inviteCode } = req.body;
+
+  if (!TELEGRAM_BOT_TOKEN) {
+    // Dev bypass
+    if (process.env.NODE_ENV !== 'production') {
+      // Mock user for dev
+      const user = { id: 12345, first_name: 'Dev', last_name: 'User', username: 'devuser', photo_url: '' };
+      return handleUserLogin(user, inviteCode, res);
+    }
+    return res.status(500).json({ error: 'Bot token not configured' });
   }
 
+  const isValid = verifyTelegramWebApp(initData, TELEGRAM_BOT_TOKEN);
+  
   if (!isValid) {
-    return res.status(401).json({ error: 'Invalid Telegram authentication' });
+    return res.status(401).json({ error: 'Invalid Telegram WebApp authentication' });
   }
 
+  const urlParams = new URLSearchParams(initData);
+  const userData = JSON.parse(urlParams.get('user') || '{}');
+  
+  handleUserLogin(userData, inviteCode, res);
+});
+
+function handleUserLogin(authData: any, inviteCode: string, res: any) {
   const { id: telegram_id, first_name, last_name, username, photo_url } = authData;
 
   // Check if user exists
@@ -87,6 +114,24 @@ router.post('/telegram', (req, res) => {
   const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
   
   res.json({ token, user });
+}
+
+router.post('/telegram', (req, res) => {
+  const { authData, inviteCode } = req.body;
+
+  let isValid = false;
+  if (TELEGRAM_BOT_TOKEN) {
+    isValid = verifyTelegramAuth(authData, TELEGRAM_BOT_TOKEN);
+  } else if (process.env.NODE_ENV !== 'production') {
+    // Dev bypass if no token is provided
+    isValid = true;
+  }
+
+  if (!isValid) {
+    return res.status(401).json({ error: 'Invalid Telegram authentication' });
+  }
+
+  handleUserLogin(authData, inviteCode, res);
 });
 
 router.get('/me', authenticateToken, (req: AuthRequest, res) => {

@@ -73,6 +73,43 @@ export default function Login() {
       }
     };
 
+    // 3. Check for Telegram Web App (Mini App) context
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg && tg.initData) {
+      tg.ready();
+      
+      // Check for invite code in start_param
+      const startParam = tg.initDataUnsafe?.start_param;
+      const activeInviteCode = startParam || localStorage.getItem('pending_invite_code');
+      
+      if (startParam) {
+        setHasInvite(true);
+      }
+
+      // Auto-login
+      fetch('/api/auth/telegram-webapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: tg.initData, inviteCode: activeInviteCode })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.token) {
+          localStorage.removeItem('pending_invite_code');
+          setToken(data.token);
+          setUser(data.user);
+          navigate('/');
+        } else {
+          // If auto-login fails (e.g. need invite code), show error or stay on login
+          if (data.error) {
+             console.error('Web App Login Error:', data.error);
+             // Optional: Show error to user
+          }
+        }
+      })
+      .catch(err => console.error('Web App Login Failed:', err));
+    }
+
     const script = document.createElement('script');
     script.src = 'https://telegram.org/js/telegram-widget.js?22';
     // Replace with your actual bot username in production
