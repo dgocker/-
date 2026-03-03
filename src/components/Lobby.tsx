@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Layers, ArrowRight, Shield } from 'lucide-react';
+import { Video, ArrowRight, Shield } from 'lucide-react';
 
 interface LobbyProps {
   onJoin: (roomId: string) => void;
@@ -36,11 +36,11 @@ export function Lobby({ onJoin }: LobbyProps) {
       >
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-md mb-4 border border-white/10">
-            <Layers className="w-8 h-8 text-white" />
+            <Video className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-4xl font-bold tracking-tight">SyncSpace</h1>
+          <h1 className="text-4xl font-bold tracking-tight">SimpleVideo</h1>
           <p className="text-white/60 text-lg">
-            Синхронизация рабочих процессов и совместный доступ.
+            Безопасные P2P видеозвонки. Без регистрации.
           </p>
         </div>
 
@@ -48,7 +48,7 @@ export function Lobby({ onJoin }: LobbyProps) {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <label htmlFor="roomId" className="text-sm font-medium text-white/60 ml-1">
-                Код сессии
+                Код комнаты
               </label>
               <input
                 id="roomId"
@@ -65,7 +65,7 @@ export function Lobby({ onJoin }: LobbyProps) {
               disabled={!roomId}
               className="w-full bg-white text-black font-semibold rounded-xl py-4 text-lg hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Подключиться <ArrowRight className="w-5 h-5" />
+              Присоединиться <ArrowRight className="w-5 h-5" />
             </button>
           </form>
 
@@ -79,13 +79,13 @@ export function Lobby({ onJoin }: LobbyProps) {
             onClick={generateRoomId}
             className="mt-6 w-full bg-white/5 hover:bg-white/10 text-white font-medium rounded-xl py-3 transition-colors border border-white/10"
           >
-            Создать новую сессию
+            Создать новый код
           </button>
         </div>
 
         <div className="flex items-center justify-center gap-2 text-white/40 text-sm">
           <Shield className="w-4 h-4" />
-          <span>Защищенное P2P соединение</span>
+          <span>Сквозное шифрование через WebRTC</span>
         </div>
       </motion.div>
     </div>

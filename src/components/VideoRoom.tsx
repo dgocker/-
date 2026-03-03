@@ -62,7 +62,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
 
   const shareToTelegram = () => {
     const url = `${window.location.origin}?room=${roomId}`;
-    const text = 'Ссылка для подключения к сессии:';
+    const text = 'Присоединяйтесь к моему видеозвонку:';
     window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -106,8 +106,8 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Подключение к сессии',
-          text: 'Нажмите на ссылку, чтобы подключиться к сессии:',
+          title: 'Присоединяйтесь к видеозвонку',
+          text: 'Нажмите на ссылку, чтобы присоединиться к видеозвонку:',
           url: url,
         });
       } catch (err) {
@@ -177,7 +177,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-white/50 space-y-4">
             <div className="w-20 h-20 rounded-full border-2 border-white/20 border-t-white animate-spin" />
-            <p>Ожидание второго участника...</p>
+            <p>Ожидание собеседника...</p>
             <div className="flex flex-col items-center gap-4 mt-4">
               <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer" onClick={(e) => { e.stopPropagation(); copyRoomId(); }}>
                 <span className="font-mono">{roomId}</span>

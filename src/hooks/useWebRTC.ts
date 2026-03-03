@@ -1,424 +1,123 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
-const STUN_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { 
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    { 
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    { 
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ],
-};
-
-type SignalMessage = 
-  | { type: 'user-joined'; payload: { userId: string } }
-  | { type: 'user-left'; payload: { userId: string } }
-  | { type: 'offer'; payload: { sdp: RTCSessionDescriptionInit; userId: string } }
-  | { type: 'answer'; payload: { sdp: RTCSessionDescriptionInit; userId: string } }
-  | { type: 'ice-candidate'; payload: { candidate: RTCIceCandidateInit; userId: string } };
-
-export function useWebRTC(roomId: string) {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
-  const [error, setError] = useState<string | null>(null);
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [isStreamReady, setIsStreamReady] = useState(false);
-  
-  const wsRef = useRef<WebSocket | null>(null);
-  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
-  const userIdRef = useRef(Math.random().toString(36).substring(2, 15));
-  const leaveTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-
-  const addRemoteStream = useCallback((userId: string, stream: MediaStream) => {
-    setRemoteStreams(prev => {
-      const newMap = new Map(prev);
-      newMap.set(userId, stream);
-      return newMap;
-    });
-  }, []);
-
-  const removeRemoteStream = useCallback((userId: string) => {
-    setRemoteStreams(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(userId);
-      return newMap;
-    });
-  }, []);
-
-  const createPeerConnection = useCallback((targetUserId: string) => {
-    if (peersRef.current.has(targetUserId)) {
-      return peersRef.current.get(targetUserId)!;
-    }
-
-    const pc = new RTCPeerConnection(STUN_SERVERS);
-    
-    pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'ice-candidate',
-          payload: { candidate: event.candidate, targetUserId }
-        }));
-      }
-    };
-
-    pc.ontrack = (event) => {
-      console.log(`Received remote track from ${targetUserId}`);
-      addRemoteStream(targetUserId, event.streams[0]);
-    };
-
-    pc.onconnectionstatechange = async () => {
-      console.log(`Connection state with ${targetUserId}:`, pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        console.log('Connection failed, attempting ICE restart...');
-        try {
-          const offer = await pc.createOffer({ iceRestart: true });
-          await pc.setLocalDescription(offer);
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'offer',
-              payload: { sdp: offer, targetUserId }
-            }));
-          }
-        } catch (err) {
-          console.error('ICE restart failed:', err);
-          removeRemoteStream(targetUserId);
-          peersRef.current.delete(targetUserId);
-        }
-      } else if (pc.connectionState === 'closed') {
-        removeRemoteStream(targetUserId);
-        peersRef.current.delete(targetUserId);
-      }
-    };
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
-    }
-
-    peersRef.current.set(targetUserId, pc);
-    return pc;
-  }, [addRemoteStream, removeRemoteStream]);
-
-  const handleOffer = useCallback(async (offer: RTCSessionDescriptionInit, userId: string) => {
-    try {
-      if (leaveTimeoutsRef.current.has(userId)) {
-        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
-        leaveTimeoutsRef.current.delete(userId);
-      }
-
-      const pc = createPeerConnection(userId);
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      
-      // Process pending candidates
-      const pending = pendingCandidatesRef.current.get(userId);
-      if (pending) {
-        console.log(`Processing ${pending.length} pending candidates for ${userId}`);
-        for (const candidate of pending) {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        }
-        pendingCandidatesRef.current.delete(userId);
-      }
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'answer',
-          payload: { sdp: answer, targetUserId: userId }
-        }));
-      }
-    } catch (err) {
-      console.error('Error handling offer:', err);
-    }
-  }, [createPeerConnection]);
-
-  const handleAnswer = useCallback(async (answer: RTCSessionDescriptionInit, userId: string) => {
-    try {
-      if (leaveTimeoutsRef.current.has(userId)) {
-        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
-        leaveTimeoutsRef.current.delete(userId);
-      }
-
-      const pc = peersRef.current.get(userId);
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        
-        // Process pending candidates
-        const pending = pendingCandidatesRef.current.get(userId);
-        if (pending) {
-          console.log(`Processing ${pending.length} pending candidates for ${userId}`);
-          for (const candidate of pending) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          }
-          pendingCandidatesRef.current.delete(userId);
-        }
-      }
-    } catch (err) {
-      console.error('Error handling answer:', err);
-    }
-  }, []);
-
-  const handleCandidate = useCallback(async (candidate: RTCIceCandidateInit, userId: string) => {
-    try {
-      const pc = peersRef.current.get(userId);
-      if (pc) {
-        if (pc.remoteDescription) {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } else {
-          console.log(`Queueing candidate for ${userId} (no remote description)`);
-          const pending = pendingCandidatesRef.current.get(userId) || [];
-          pending.push(candidate);
-          pendingCandidatesRef.current.set(userId, pending);
-        }
-      } else {
-        // If PC doesn't exist yet, queue it? 
-        // Usually PC is created on Offer/UserJoined. 
-        // If we receive candidate before Offer, we should probably queue it too, 
-        // but we need to know it's for a future PC.
-        console.log(`Queueing candidate for ${userId} (no PC)`);
-        const pending = pendingCandidatesRef.current.get(userId) || [];
-        pending.push(candidate);
-        pendingCandidatesRef.current.set(userId, pending);
-      }
-    } catch (err) {
-      console.error('Error handling candidate:', err);
-    }
-  }, []);
-
-  const handleUserJoined = useCallback(async (userId: string) => {
-    console.log('User joined, creating offer for', userId);
-    try {
-      if (leaveTimeoutsRef.current.has(userId)) {
-        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
-        leaveTimeoutsRef.current.delete(userId);
-        console.log('User reconnected, cancelled leave timeout:', userId);
-      }
-
-      const pc = createPeerConnection(userId);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'offer',
-          payload: { sdp: offer, targetUserId: userId }
-        }));
-      }
-    } catch (err) {
-      console.error('Error handling user joined:', err);
-    }
-  }, [createPeerConnection]);
-
-  const handleUserLeft = useCallback((userId: string) => {
-    console.log('User left signaling, waiting to see if they reconnect:', userId);
-    
-    if (leaveTimeoutsRef.current.has(userId)) {
-      clearTimeout(leaveTimeoutsRef.current.get(userId)!);
-    }
-
-    const timeout = setTimeout(() => {
-      console.log('User did not reconnect, closing pc:', userId);
-      const pc = peersRef.current.get(userId);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(userId);
-      }
-      removeRemoteStream(userId);
-      pendingCandidatesRef.current.delete(userId);
-      leaveTimeoutsRef.current.delete(userId);
-    }, 10000);
-    
-    leaveTimeoutsRef.current.set(userId, timeout);
-  }, [removeRemoteStream]);
-
-  const toggleCamera = useCallback(async () => {
-    if (!localStreamRef.current) return;
-    
-    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newFacingMode }
-      });
-      
-      const newVideoTrack = newStream.getVideoTracks()[0];
-      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-      
-      if (oldVideoTrack) {
-        newVideoTrack.enabled = oldVideoTrack.enabled;
-        localStreamRef.current.removeTrack(oldVideoTrack);
-        oldVideoTrack.stop();
-      }
-      
-      localStreamRef.current.addTrack(newVideoTrack);
-      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-      
-      // Use Promise.allSettled to ensure we don't crash if one peer fails
-      await Promise.allSettled(
-        Array.from(peersRef.current.values()).map(async (pc) => {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (sender) {
-            await sender.replaceTrack(newVideoTrack);
-          }
-        })
-      );
-      
-      setFacingMode(newFacingMode);
-    } catch (err) {
-      console.error('Error switching camera:', err);
-    }
-  }, [facingMode]);
+export function useWebRTC(
+  socket: any,
+  localStream: MediaStream | null,
+  setRemoteStream: (stream: MediaStream | null) => void,
+  onCallEnded: () => void
+) {
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
 
   useEffect(() => {
-    const startLocalStream = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: 'user',
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30, max: 60 }
-          }, 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
+    if (!socket) return;
+
+    const createPeerConnection = () => {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+      });
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('webrtc_ice_candidate', { candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          onCallEnded();
+        }
+      };
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          pc.addTrack(track, localStream);
         });
-        setLocalStream(stream);
-        localStreamRef.current = stream;
-        setIsStreamReady(true);
-      } catch (err) {
-        console.error('Error accessing media devices:', err);
-        setError('Не удалось получить доступ к камере или микрофону. Пожалуйста, разрешите доступ в настройках браузера.');
       }
+
+      return pc;
     };
 
-    startLocalStream();
+    socket.on('webrtc_offer', async ({ offer, from }: any) => {
+      if (!peerConnection.current) {
+        peerConnection.current = createPeerConnection();
+      }
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+      socket.emit('webrtc_answer', { answer, to: from });
+    });
+
+    socket.on('webrtc_answer', async ({ answer }: any) => {
+      if (peerConnection.current) {
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+    });
+
+    socket.on('webrtc_ice_candidate', async ({ candidate }: any) => {
+      if (peerConnection.current) {
+        try {
+          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          console.error('Error adding received ice candidate', e);
+        }
+      }
+    });
 
     return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+      socket.off('webrtc_offer');
+      socket.off('webrtc_answer');
+      socket.off('webrtc_ice_candidate');
+    };
+  }, [socket, localStream, setRemoteStream, onCallEnded]);
+
+  const initiateCall = async (to: number) => {
+    peerConnection.current = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      ]
+    });
+
+    peerConnection.current.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('webrtc_ice_candidate', { candidate: event.candidate, to });
       }
     };
-  }, []);
 
-  useEffect(() => {
-    if (!roomId || !isStreamReady) return;
-
-    let ws: WebSocket;
-    let pingInterval: NodeJS.Timeout;
-    let reconnectTimeout: NodeJS.Timeout;
-    let isComponentMounted = true;
-
-    const connectWebSocket = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        setConnectionStatus('connected');
-        ws.send(JSON.stringify({
-          type: 'join-room',
-          payload: { roomId, userId: userIdRef.current }
-        }));
-      };
-
-      ws.onmessage = async (event) => {
-        const message: SignalMessage = JSON.parse(event.data);
-        console.log('Received signal:', message.type);
-
-        switch (message.type) {
-          case 'user-joined':
-            handleUserJoined(message.payload.userId);
-            break;
-          case 'offer':
-            handleOffer(message.payload.sdp, message.payload.userId);
-            break;
-          case 'answer':
-            handleAnswer(message.payload.sdp, message.payload.userId);
-            break;
-          case 'ice-candidate':
-            handleCandidate(message.payload.candidate, message.payload.userId);
-            break;
-          case 'user-left':
-            handleUserLeft(message.payload.userId);
-            break;
-        }
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        
-        // Delay showing disconnected status to avoid flashing on brief network drops (e.g. during ICE gathering)
-        const disconnectTimeout = setTimeout(() => {
-          if (isComponentMounted && wsRef.current?.readyState !== WebSocket.OPEN) {
-            setConnectionStatus('disconnected');
-          }
-        }, 2000);
-
-        clearInterval(pingInterval);
-        
-        if (isComponentMounted) {
-          console.log('Attempting to reconnect in 3 seconds...');
-          reconnectTimeout = setTimeout(() => {
-            connectWebSocket();
-          }, 3000);
-        }
-      };
-
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        }
-      }, 25000);
+    peerConnection.current.ontrack = (event) => {
+      setRemoteStream(event.streams[0]);
     };
 
-    connectWebSocket();
-
-    return () => {
-      isComponentMounted = false;
-      clearTimeout(reconnectTimeout);
-      clearInterval(pingInterval);
-      if (ws) {
-        ws.onclose = null; // Prevent reconnect loop on unmount
-        ws.close();
+    peerConnection.current.onconnectionstatechange = () => {
+      if (peerConnection.current?.connectionState === 'disconnected' || peerConnection.current?.connectionState === 'failed' || peerConnection.current?.connectionState === 'closed') {
+        onCallEnded();
       }
-      peersRef.current.forEach(pc => {
-        pc.onicecandidate = null;
-        pc.ontrack = null;
-        pc.onconnectionstatechange = null;
-        pc.close();
+    };
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        peerConnection.current?.addTrack(track, localStream);
       });
-      peersRef.current.clear();
-      pendingCandidatesRef.current.clear();
-      setRemoteStreams(new Map());
-      
-      // Clear all leave timeouts
-      leaveTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
-      leaveTimeoutsRef.current.clear();
-    };
-  }, [roomId, isStreamReady, handleUserJoined, handleOffer, handleAnswer, handleCandidate, handleUserLeft]);
+    }
 
-  return { localStream, remoteStreams, connectionStatus, error, toggleCamera };
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+    socket.emit('webrtc_offer', { offer, to });
+  };
+
+  const cleanup = () => {
+    if (peerConnection.current) {
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+  };
+
+  return { initiateCall, cleanup };
 }

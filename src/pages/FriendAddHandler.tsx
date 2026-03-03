@@ -1,0 +1,76 @@
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useStore } from '../store/useStore';
+import { motion } from 'framer-motion';
+
+export default function FriendAddHandler() {
+  const { code } = useParams();
+  const navigate = useNavigate();
+  const { token } = useStore();
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('Adding friend...');
+
+  useEffect(() => {
+    if (!token) {
+      navigate(`/login?redirect=/add-friend/${code}`);
+      return;
+    }
+
+    const addFriend = async () => {
+      try {
+        const res = await fetch('/api/friends/add', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ code })
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          setStatus('success');
+          setMessage('Friend added successfully!');
+          setTimeout(() => navigate('/'), 2000);
+        } else {
+          setStatus('error');
+          setMessage(data.error || 'Failed to add friend');
+        }
+      } catch (err) {
+        setStatus('error');
+        setMessage('An error occurred');
+      }
+    };
+
+    addFriend();
+  }, [code, navigate, token]);
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-zinc-950">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="p-8 bg-zinc-900 rounded-2xl shadow-xl border border-zinc-800 text-center max-w-sm w-full"
+      >
+        <h2 className={`text-xl font-semibold mb-4 ${
+          status === 'success' ? 'text-emerald-400' : 
+          status === 'error' ? 'text-red-400' : 'text-zinc-100'
+        }`}>
+          {status === 'loading' ? 'Processing...' : 
+           status === 'success' ? 'Success!' : 'Oops!'}
+        </h2>
+        <p className="text-zinc-400">{message}</p>
+        
+        {status !== 'loading' && (
+          <button 
+            onClick={() => navigate('/')}
+            className="mt-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-lg transition-colors"
+          >
+            Go to Dashboard
+          </button>
+        )}
+      </motion.div>
+    </div>
+  );
+}

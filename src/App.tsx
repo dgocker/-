@@ -1,35 +1,42 @@
-import { useState, useEffect } from 'react';
-import { Lobby } from './components/Lobby';
-import { VideoRoom } from './components/VideoRoom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useStore } from './store/useStore';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import Admin from './pages/Admin';
+import InviteHandler from './pages/InviteHandler';
+import FriendAddHandler from './pages/FriendAddHandler';
 
-export default function App() {
-  const [roomId, setRoomId] = useState<string | null>(null);
+function App() {
+  const { token, setUser, logout } = useStore();
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomFromUrl = params.get('room');
-    if (roomFromUrl) {
-      setRoomId(roomFromUrl);
+    if (token) {
+      fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('Invalid token');
+        return res.json();
+      })
+      .then(data => setUser(data.user))
+      .catch(() => logout());
     }
-  }, []);
-
-  const handleJoin = (id: string) => {
-    setRoomId(id);
-    window.history.pushState({}, '', `?room=${id}`);
-  };
-
-  const handleLeave = () => {
-    setRoomId(null);
-    window.history.pushState({}, '', window.location.pathname);
-  };
+  }, [token, setUser, logout]);
 
   return (
-    <div className="w-full h-full font-sans">
-      {roomId ? (
-        <VideoRoom roomId={roomId} onLeave={handleLeave} />
-      ) : (
-        <Lobby onJoin={handleJoin} />
-      )}
-    </div>
+    <BrowserRouter>
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans">
+        <Routes>
+          <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
+          <Route path="/invite/:code" element={<InviteHandler />} />
+          <Route path="/add-friend/:code" element={<FriendAddHandler />} />
+          <Route path="/" element={token ? <Dashboard /> : <Navigate to="/login" />} />
+          <Route path="/admin" element={token ? <Admin /> : <Navigate to="/login" />} />
+        </Routes>
+      </div>
+    </BrowserRouter>
   );
 }
+
+export default App;
