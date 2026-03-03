@@ -53,6 +53,7 @@ export default function Login() {
     script.setAttribute('data-size', 'large');
     script.setAttribute('data-onauth', 'TelegramLoginWidget.dataOnauth(user)');
     script.setAttribute('data-request-access', 'write');
+    script.async = true;
     
     if (containerRef.current) {
       containerRef.current.innerHTML = '';

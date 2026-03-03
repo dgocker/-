@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import jwt from 'jsonwebtoken';
 import { db, initDb } from './src/server/db.js';
 import { setupSocket } from './src/server/socket.js';
@@ -48,6 +49,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static('dist'));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve('dist/index.html'));
+    });
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
