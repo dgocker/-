@@ -23,12 +23,26 @@ export default function Login() {
     // 1. Immediately save invite code from URL to localStorage if present
     const searchParams = new URLSearchParams(location.search);
     const urlInviteCode = searchParams.get('invite');
-    const storedInviteCode = localStorage.getItem('pending_invite_code');
+    
+    // Migration: Check if stored invite code is actually a friend code (fix for previous bug)
+    const existingStoredCode = localStorage.getItem('pending_invite_code');
+    if (existingStoredCode && existingStoredCode.startsWith('friend-')) {
+       localStorage.setItem('pending_friend_code', existingStoredCode.replace('friend-', ''));
+       localStorage.removeItem('pending_invite_code');
+    }
     
     if (urlInviteCode) {
-      localStorage.setItem('pending_invite_code', urlInviteCode);
-      setHasInvite(true);
-    } else if (storedInviteCode) {
+      if (urlInviteCode.startsWith('friend-')) {
+        localStorage.setItem('pending_friend_code', urlInviteCode.replace('friend-', ''));
+      } else {
+        localStorage.setItem('pending_invite_code', urlInviteCode);
+        setHasInvite(true);
+      }
+    }
+    
+    // Check for stored app invite code
+    const storedInviteCode = localStorage.getItem('pending_invite_code');
+    if (storedInviteCode) {
       setHasInvite(true);
     } else {
       // Retry check after a short delay for slow mobile storage
@@ -44,9 +58,26 @@ export default function Login() {
     window.TelegramLoginWidget = {
       dataOnauth: async (user: any) => {
         // 3. Read code dynamically at the moment of login (most reliable)
-        // Priority: URL param -> LocalStorage
+        // Priority: URL param (if not friend code) -> LocalStorage
         const currentSearchParams = new URLSearchParams(window.location.search);
-        const activeInviteCode = currentSearchParams.get('invite') || localStorage.getItem('pending_invite_code');
+        let activeInviteCode = currentSearchParams.get('invite');
+        
+        if (activeInviteCode && activeInviteCode.startsWith('friend-')) {
+           // If URL has friend code, save it and ignore for auth
+           localStorage.setItem('pending_friend_code', activeInviteCode.replace('friend-', ''));
+           activeInviteCode = null;
+        }
+        
+        if (!activeInviteCode) {
+          let stored = localStorage.getItem('pending_invite_code');
+          // Migration check here too just in case
+          if (stored && stored.startsWith('friend-')) {
+             localStorage.setItem('pending_friend_code', stored.replace('friend-', ''));
+             localStorage.removeItem('pending_invite_code');
+             stored = null;
+          }
+          activeInviteCode = stored;
+        }
 
         try {
           const response = await fetch('/api/auth/telegram', {
@@ -62,6 +93,25 @@ export default function Login() {
             localStorage.removeItem('pending_invite_code');
             setToken(data.token);
             setUser(data.user);
+            
+            // Check for pending friend code
+            const pendingFriendCode = localStorage.getItem('pending_friend_code');
+            if (pendingFriendCode) {
+              try {
+                 await fetch('/api/friends/add', {
+                   method: 'POST',
+                   headers: { 
+                     'Content-Type': 'application/json',
+                     'Authorization': `Bearer ${data.token}`
+                   },
+                   body: JSON.stringify({ code: pendingFriendCode })
+                 });
+                 localStorage.removeItem('pending_friend_code');
+              } catch (e) {
+                console.error('Failed to auto-add friend after login', e);
+              }
+            }
+
             navigate('/');
           } else {
             alert(data.error || 'Ошибка входа');
@@ -80,14 +130,19 @@ export default function Login() {
       
       // Check for invite code in start_param
       const startParam = tg.initDataUnsafe?.start_param;
-      let activeInviteCode = startParam || localStorage.getItem('pending_invite_code');
+      let activeInviteCode = startParam;
       
       // Handle 'friend-' prefix if present in start_param
       if (activeInviteCode && activeInviteCode.startsWith('friend-')) {
-          activeInviteCode = activeInviteCode.replace('friend-', '');
+          localStorage.setItem('pending_friend_code', activeInviteCode.replace('friend-', ''));
+          activeInviteCode = null;
       }
       
-      if (startParam) {
+      if (!activeInviteCode) {
+        activeInviteCode = localStorage.getItem('pending_invite_code');
+      }
+      
+      if (activeInviteCode) {
         setHasInvite(true);
       }
 
@@ -104,23 +159,19 @@ export default function Login() {
           setToken(data.token);
           setUser(data.user);
           
-          // If it was a friend invite, try to add friend immediately
-          if (startParam && startParam.startsWith('friend-')) {
-             const friendCode = startParam.replace('friend-', '');
+          // Check for pending friend code (from start_param or localStorage)
+          const pendingFriendCode = localStorage.getItem('pending_friend_code');
+          if (pendingFriendCode) {
              try {
-               const res = await fetch('/api/friends/add', {
+               await fetch('/api/friends/add', {
                  method: 'POST',
                  headers: { 
                    'Content-Type': 'application/json',
                    'Authorization': `Bearer ${data.token}`
                  },
-                 body: JSON.stringify({ code: friendCode })
+                 body: JSON.stringify({ code: pendingFriendCode })
                });
-               
-               // If adding friend failed because user is new and needs app invite first
-               if (!res.ok) {
-                   console.warn('Could not add friend automatically');
-               }
+               localStorage.removeItem('pending_friend_code');
              } catch (e) {
                console.error('Failed to auto-add friend', e);
              }
