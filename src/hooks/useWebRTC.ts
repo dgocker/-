@@ -199,7 +199,7 @@ export function useWebRTC(roomId: string) {
         localStreamRef.current = stream;
       } catch (err) {
         console.error('Error accessing media devices:', err);
-        setError('Could not access camera or microphone. Please allow permissions.');
+        setError('Не удалось получить доступ к камере или микрофону. Пожалуйста, разрешите доступ в настройках браузера.');
       }
     };
 

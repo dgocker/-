@@ -74,7 +74,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
         <div className="text-white space-y-4">
           <p className="text-red-400 text-lg">{error}</p>
           <button onClick={onLeave} className="bg-white text-black px-6 py-2 rounded-full font-medium">
-            Go Back
+            Вернуться
           </button>
         </div>
       </div>
@@ -111,7 +111,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-white/50 space-y-4">
             <div className="w-20 h-20 rounded-full border-2 border-white/20 border-t-white animate-spin" />
-            <p>Waiting for peer...</p>
+            <p>Ожидание собеседника...</p>
             <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer" onClick={(e) => { e.stopPropagation(); copyRoomId(); }}>
               <span className="font-mono">{roomId}</span>
               {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
@@ -184,9 +184,9 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
             connectionStatus === 'disconnected' ? 'bg-red-400' : 
             'bg-yellow-400 animate-pulse'
           }`} />
-          {connectionStatus === 'connected' ? 'Connected' : 
-           connectionStatus === 'disconnected' ? 'Disconnected' : 
-           'Connecting...'}
+          {connectionStatus === 'connected' ? 'Подключено' : 
+           connectionStatus === 'disconnected' ? 'Отключено' : 
+           'Подключение...'}
         </div>
       </div>
     </div>
