@@ -98,11 +98,34 @@ export default function Login() {
         body: JSON.stringify({ initData: tg.initData, inviteCode: activeInviteCode })
       })
       .then(res => res.json())
-      .then(data => {
+      .then(async (data) => {
         if (data.token) {
           localStorage.removeItem('pending_invite_code');
           setToken(data.token);
           setUser(data.user);
+          
+          // If it was a friend invite, try to add friend immediately
+          if (startParam && startParam.startsWith('friend-')) {
+             const friendCode = startParam.replace('friend-', '');
+             try {
+               const res = await fetch('/api/friends/add', {
+                 method: 'POST',
+                 headers: { 
+                   'Content-Type': 'application/json',
+                   'Authorization': `Bearer ${data.token}`
+                 },
+                 body: JSON.stringify({ code: friendCode })
+               });
+               
+               // If adding friend failed because user is new and needs app invite first
+               if (!res.ok) {
+                   console.warn('Could not add friend automatically');
+               }
+             } catch (e) {
+               console.error('Failed to auto-add friend', e);
+             }
+          }
+
           navigate('/');
         } else {
           // If auto-login fails (e.g. need invite code), show error or stay on login
