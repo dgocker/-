@@ -11,6 +11,9 @@ export default function InviteHandler() {
     if (token) {
       navigate('/');
     } else {
+      if (code) {
+        localStorage.setItem('pending_invite_code', code);
+      }
       navigate(`/login?invite=${code}`);
     }
   }, [code, navigate, token]);

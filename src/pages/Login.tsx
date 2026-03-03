@@ -18,21 +18,34 @@ export default function Login() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // 1. Immediately save invite code from URL to localStorage if present
     const searchParams = new URLSearchParams(location.search);
-    const inviteCode = searchParams.get('invite');
+    const urlInviteCode = searchParams.get('invite');
+    
+    if (urlInviteCode) {
+      localStorage.setItem('pending_invite_code', urlInviteCode);
+    }
 
+    // 2. Setup Telegram widget
     window.TelegramLoginWidget = {
       dataOnauth: async (user: any) => {
+        // 3. Read code dynamically at the moment of login (most reliable)
+        // Priority: URL param -> LocalStorage
+        const currentSearchParams = new URLSearchParams(window.location.search);
+        const activeInviteCode = currentSearchParams.get('invite') || localStorage.getItem('pending_invite_code');
+
         try {
           const response = await fetch('/api/auth/telegram', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ authData: user, inviteCode })
+            body: JSON.stringify({ authData: user, inviteCode: activeInviteCode })
           });
           
           const data = await response.json();
           
           if (response.ok) {
+            // Only clear code on successful login
+            localStorage.removeItem('pending_invite_code');
             setToken(data.token);
             setUser(data.user);
             navigate('/');
@@ -61,6 +74,9 @@ export default function Login() {
     }
   }, [location, navigate, setToken, setUser]);
 
+  // Visual helper to show if invite code is present
+  const hasInvite = new URLSearchParams(location.search).get('invite') || localStorage.getItem('pending_invite_code');
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-zinc-950">
       <motion.div 
@@ -69,7 +85,14 @@ export default function Login() {
         className="p-8 bg-zinc-900 rounded-2xl shadow-xl border border-zinc-800 text-center max-w-sm w-full"
       >
         <h1 className="text-2xl font-semibold text-zinc-100 mb-2">Добро пожаловать</h1>
-        <p className="text-zinc-400 mb-8 text-sm">Войдите через Telegram для продолжения</p>
+        <p className="text-zinc-400 mb-4 text-sm">Войдите через Telegram для продолжения</p>
+        
+        {hasInvite && (
+          <div className="mb-6 py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-xs font-medium flex items-center justify-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"/>
+            Код приглашения применен
+          </div>
+        )}
         
         <div ref={containerRef} className="flex justify-center min-h-[40px]">
           {/* Telegram widget will be injected here */}
