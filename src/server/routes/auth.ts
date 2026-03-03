@@ -36,32 +36,41 @@ function verifyTelegramWebApp(initData: string, botToken: string) {
 }
 
 router.post('/telegram-webapp', async (req, res) => {
-  const { initData, inviteCode } = req.body;
+  try {
+    const { initData, inviteCode } = req.body;
 
-  if (!TELEGRAM_BOT_TOKEN) {
-    // Dev bypass
-    if (process.env.NODE_ENV !== 'production') {
-      // Mock user for dev
-      const user = { id: 12345, first_name: 'Dev', last_name: 'User', username: 'devuser', photo_url: '' };
-      return await handleUserLogin(user, inviteCode, res);
+    if (!TELEGRAM_BOT_TOKEN) {
+      // Dev bypass
+      if (process.env.NODE_ENV !== 'production') {
+        // Mock user for dev
+        const user = { id: 12345, first_name: 'Dev', last_name: 'User', username: 'devuser', photo_url: '' };
+        return await handleUserLogin(user, inviteCode, res);
+      }
+      return res.status(500).json({ error: 'Bot token not configured' });
     }
-    return res.status(500).json({ error: 'Bot token not configured' });
-  }
 
-  const isValid = verifyTelegramWebApp(initData, TELEGRAM_BOT_TOKEN);
-  
-  if (!isValid) {
-    return res.status(401).json({ error: 'Invalid Telegram WebApp authentication' });
-  }
+    const isValid = verifyTelegramWebApp(initData, TELEGRAM_BOT_TOKEN);
+    
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid Telegram WebApp authentication' });
+    }
 
-  const urlParams = new URLSearchParams(initData);
-  const userData = JSON.parse(urlParams.get('user') || '{}');
-  
-  await handleUserLogin(userData, inviteCode, res);
+    const urlParams = new URLSearchParams(initData);
+    const userData = JSON.parse(urlParams.get('user') || '{}');
+    
+    await handleUserLogin(userData, inviteCode, res);
+  } catch (error) {
+    console.error('Error in /telegram-webapp:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 async function handleUserLogin(authData: any, inviteCode: string, res: any) {
   const { id: telegram_id, first_name, last_name, username, photo_url } = authData;
+
+  if (!telegram_id) {
+    return res.status(400).json({ error: 'Invalid user data: missing telegram_id' });
+  }
 
   // Check if user exists
   let user = await db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegram_id) as any;
@@ -117,21 +126,26 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
 }
 
 router.post('/telegram', async (req, res) => {
-  const { authData, inviteCode } = req.body;
+  try {
+    const { authData, inviteCode } = req.body;
 
-  let isValid = false;
-  if (TELEGRAM_BOT_TOKEN) {
-    isValid = verifyTelegramAuth(authData, TELEGRAM_BOT_TOKEN);
-  } else if (process.env.NODE_ENV !== 'production') {
-    // Dev bypass if no token is provided
-    isValid = true;
+    let isValid = false;
+    if (TELEGRAM_BOT_TOKEN) {
+      isValid = verifyTelegramAuth(authData, TELEGRAM_BOT_TOKEN);
+    } else if (process.env.NODE_ENV !== 'production') {
+      // Dev bypass if no token is provided
+      isValid = true;
+    }
+
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid Telegram authentication' });
+    }
+
+    await handleUserLogin(authData, inviteCode, res);
+  } catch (error) {
+    console.error('Error in /telegram:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  if (!isValid) {
-    return res.status(401).json({ error: 'Invalid Telegram authentication' });
-  }
-
-  await handleUserLogin(authData, inviteCode, res);
 });
 
 router.get('/me', authenticateToken, (req: AuthRequest, res) => {
