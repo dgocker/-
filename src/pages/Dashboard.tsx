@@ -6,11 +6,10 @@ import { io, Socket } from 'socket.io-client';
 import { Phone, PhoneOff, Video, Users, LogOut, Copy, CheckCircle2 } from 'lucide-react';
 import { useWebRTC } from '../hooks/useWebRTC';
 
-let socket: Socket;
-
 export default function Dashboard() {
   const { user, token, logout, onlineFriends, setOnlineFriends, addOnlineFriend, removeOnlineFriend } = useStore();
   const navigate = useNavigate();
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [friends, setFriends] = useState<any[]>([]);
   const [linkCopied, setLinkCopied] = useState(false);
   
@@ -63,40 +62,41 @@ export default function Dashboard() {
     .then(data => setFriends(data.friends));
 
     // Socket setup
-    socket = io({
+    const newSocket = io({
       auth: { token }
     });
+    setSocket(newSocket);
 
-    socket.on('online_friends', (friends: number[]) => {
+    newSocket.on('online_friends', (friends: number[]) => {
       setOnlineFriends(friends);
     });
 
-    socket.on('friend_online', ({ userId }) => {
+    newSocket.on('friend_online', ({ userId }) => {
       addOnlineFriend(userId);
     });
 
-    socket.on('friend_offline', ({ userId }) => {
+    newSocket.on('friend_offline', ({ userId }) => {
       removeOnlineFriend(userId);
     });
 
-    socket.on('call_incoming', (data) => {
+    newSocket.on('call_incoming', (data) => {
       setIncomingCall(data);
     });
 
-    socket.on('call_accepted', ({ from }) => {
+    newSocket.on('call_accepted', ({ from }) => {
       console.log('Call accepted by', from);
       setCallActive(true);
       setActiveCallUserId(from);
       initiateCall(from);
     });
 
-    socket.on('call_ended', () => {
+    newSocket.on('call_ended', () => {
       handleCallEnded();
       cleanup();
     });
 
     return () => {
-      socket.disconnect();
+      newSocket.disconnect();
       cleanup();
     };
   }, [token, navigate, setOnlineFriends, addOnlineFriend, removeOnlineFriend]);
@@ -120,6 +120,7 @@ export default function Dashboard() {
   };
 
   const startCall = async (friendId: number) => {
+    if (!socket) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setLocalStream(stream);
@@ -138,6 +139,7 @@ export default function Dashboard() {
   };
 
   const answerCall = async () => {
+    if (!socket) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setLocalStream(stream);
@@ -154,6 +156,7 @@ export default function Dashboard() {
   };
 
   const endCall = () => {
+    if (!socket) return;
     if (activeCallUserId) {
       socket.emit('end_call', { to: activeCallUserId });
     } else if (incomingCall) {

@@ -7,6 +7,11 @@ export function useWebRTC(
   onCallEnded: () => void
 ) {
   const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const socketRef = useRef(socket);
+
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
 
   useEffect(() => {
     if (!socket) return;
@@ -93,6 +98,11 @@ export function useWebRTC(
   }, [socket, localStream, setRemoteStream, onCallEnded]);
 
   const initiateCall = async (to: number) => {
+    const currentSocket = socketRef.current;
+    if (!currentSocket) {
+      console.error('Socket is not initialized');
+      return;
+    }
     console.log('Initiating call to', to);
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
@@ -104,7 +114,7 @@ export function useWebRTC(
     peerConnection.current.onicecandidate = (event) => {
       if (event.candidate) {
         console.log('Sending ICE candidate to', to);
-        socket.emit('webrtc_ice_candidate', { candidate: event.candidate, to });
+        currentSocket.emit('webrtc_ice_candidate', { candidate: event.candidate, to });
       }
     };
 
@@ -128,7 +138,7 @@ export function useWebRTC(
 
     const offer = await peerConnection.current.createOffer();
     await peerConnection.current.setLocalDescription(offer);
-    socket.emit('webrtc_offer', { offer, to });
+    currentSocket.emit('webrtc_offer', { offer, to });
   };
 
   const cleanup = () => {
