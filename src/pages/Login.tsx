@@ -30,6 +30,14 @@ export default function Login() {
       setHasInvite(true);
     } else if (storedInviteCode) {
       setHasInvite(true);
+    } else {
+      // Retry check after a short delay for slow mobile storage
+      setTimeout(() => {
+        const delayedStoredCode = localStorage.getItem('pending_invite_code');
+        if (delayedStoredCode) {
+          setHasInvite(true);
+        }
+      }, 500);
     }
 
     // 2. Setup Telegram widget

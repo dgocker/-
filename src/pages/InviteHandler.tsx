@@ -14,8 +14,12 @@ export default function InviteHandler() {
       if (code) {
         // Save to local storage
         localStorage.setItem('pending_invite_code', code);
-        // Force hard redirect to ensure URL params are visible to the Login page immediately
-        window.location.replace(`/login?invite=${code}`);
+        
+        // Small delay to ensure localStorage is written on mobile devices
+        setTimeout(() => {
+          // Use href instead of replace to ensure full navigation event
+          window.location.href = `/login?invite=${code}`;
+        }, 100);
       } else {
         navigate('/login');
       }
