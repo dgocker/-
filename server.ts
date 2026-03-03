@@ -34,6 +34,10 @@ async function startServer() {
         const { type, payload } = data;
 
         switch (type) {
+          case "ping": {
+            ws.send(JSON.stringify({ type: "pong" }));
+            break;
+          }
           case "join-room": {
             const { roomId } = payload;
             ws.roomId = roomId;

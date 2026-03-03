@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, SwitchCamera, Share2 } from 'lucide-react';
 import { useWebRTC } from '../hooks/useWebRTC';
 
 interface VideoRoomProps {
@@ -9,14 +9,35 @@ interface VideoRoomProps {
 }
 
 export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
-  const { localStream, remoteStreams, connectionStatus, error } = useWebRTC(roomId);
+  const { localStream, remoteStreams, connectionStatus, error, toggleCamera } = useWebRTC(roomId);
   const localVideoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const controlsTimeoutRef = useRef<NodeJS.Timeout>(null);
+  const [constraints, setConstraints] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
+
+  useEffect(() => {
+    const updateConstraints = () => {
+      setConstraints({
+        left: -(window.innerWidth - 128 - 32), // 128px width, 32px padding (16px left + 16px right)
+        right: 0,
+        top: 0,
+        bottom: window.innerHeight - 192 - 32, // 192px height, 32px padding
+      });
+    };
+    
+    updateConstraints();
+    window.addEventListener('resize', updateConstraints);
+    return () => window.removeEventListener('resize', updateConstraints);
+  }, []);
+
+  const shareToTelegram = () => {
+    const url = `${window.location.origin}?room=${roomId}`;
+    const text = 'Присоединяйтесь к моему видеозвонку:';
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank');
+  };
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -46,6 +67,25 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const shareLink = async () => {
+    const url = `${window.location.origin}?room=${roomId}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Присоединяйтесь к видеозвонку',
+          text: 'Нажмите на ссылку, чтобы присоединиться к видеозвонку:',
+          url: url,
+        });
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleScreenTap = () => {
@@ -85,6 +125,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
 
   return (
     <div 
+      ref={containerRef}
       className="fixed inset-0 bg-black overflow-hidden" 
       onClick={handleScreenTap}
     >
@@ -112,9 +153,28 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
           <div className="w-full h-full flex flex-col items-center justify-center text-white/50 space-y-4">
             <div className="w-20 h-20 rounded-full border-2 border-white/20 border-t-white animate-spin" />
             <p>Ожидание собеседника...</p>
-            <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer" onClick={(e) => { e.stopPropagation(); copyRoomId(); }}>
-              <span className="font-mono">{roomId}</span>
-              {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+            <div className="flex flex-col items-center gap-4 mt-4">
+              <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer" onClick={(e) => { e.stopPropagation(); copyRoomId(); }}>
+                <span className="font-mono">{roomId}</span>
+                {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); shareLink(); }}
+                  className="bg-white/10 hover:bg-white/20 text-white px-6 py-3 rounded-full font-medium flex items-center gap-2 transition-colors border border-white/10"
+                >
+                  <Share2 className="w-5 h-5" /> Поделиться
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); shareToTelegram(); }}
+                  className="bg-[#2AABEE] hover:bg-[#229ED9] text-white px-6 py-3 rounded-full font-medium flex items-center gap-2 transition-colors shadow-lg shadow-[#2AABEE]/20"
+                >
+                  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                  </svg>
+                  Telegram
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -123,7 +183,9 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
       {/* Local Video (PIP) */}
       <motion.div 
         drag
-        dragConstraints={{ left: 0, right: 200, top: 0, bottom: 400 }}
+        dragConstraints={constraints}
+        dragElastic={0}
+        dragMomentum={false}
         className="absolute top-4 right-4 z-20 w-32 h-48 bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
       >
         <video
@@ -168,6 +230,13 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
             className={`p-4 rounded-full transition-all ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}
           >
             {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+          </button>
+
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleCamera(); }}
+            className="p-4 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all"
+          >
+            <SwitchCamera className="w-6 h-6" />
           </button>
         </div>
       </motion.div>

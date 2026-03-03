@@ -21,6 +21,7 @@ export function useWebRTC(roomId: string) {
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   
   const wsRef = useRef<WebSocket | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -188,6 +189,40 @@ export function useWebRTC(roomId: string) {
     pendingCandidatesRef.current.delete(userId);
   }, [removeRemoteStream]);
 
+  const toggleCamera = useCallback(async () => {
+    if (!localStreamRef.current) return;
+    
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacingMode }
+      });
+      
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      
+      if (oldVideoTrack) {
+        newVideoTrack.enabled = oldVideoTrack.enabled;
+        localStreamRef.current.removeTrack(oldVideoTrack);
+        oldVideoTrack.stop();
+      }
+      
+      localStreamRef.current.addTrack(newVideoTrack);
+      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      
+      peersRef.current.forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(newVideoTrack);
+        }
+      });
+      
+      setFacingMode(newFacingMode);
+    } catch (err) {
+      console.error('Error switching camera:', err);
+    }
+  }, [facingMode]);
+
   useEffect(() => {
     const startLocalStream = async () => {
       try {
@@ -215,55 +250,79 @@ export function useWebRTC(roomId: string) {
   useEffect(() => {
     if (!roomId || !localStream) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let ws: WebSocket;
+    let pingInterval: NodeJS.Timeout;
+    let reconnectTimeout: NodeJS.Timeout;
+    let isComponentMounted = true;
 
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      setConnectionStatus('connected');
-      ws.send(JSON.stringify({
-        type: 'join-room',
-        payload: { roomId }
-      }));
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setConnectionStatus('connected');
+        ws.send(JSON.stringify({
+          type: 'join-room',
+          payload: { roomId }
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        const message: SignalMessage = JSON.parse(event.data);
+        console.log('Received signal:', message.type);
+
+        switch (message.type) {
+          case 'user-joined':
+            handleUserJoined(message.payload.userId);
+            break;
+          case 'offer':
+            handleOffer(message.payload.sdp, message.payload.userId);
+            break;
+          case 'answer':
+            handleAnswer(message.payload.sdp, message.payload.userId);
+            break;
+          case 'ice-candidate':
+            handleCandidate(message.payload.candidate, message.payload.userId);
+            break;
+          case 'user-left':
+            handleUserLeft(message.payload.userId);
+            break;
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        setConnectionStatus('disconnected');
+        clearInterval(pingInterval);
+        
+        if (isComponentMounted) {
+          console.log('Attempting to reconnect in 3 seconds...');
+          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        }
+      };
+
+      pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 25000);
     };
 
-    ws.onmessage = async (event) => {
-      const message: SignalMessage = JSON.parse(event.data);
-      console.log('Received signal:', message.type);
-
-      switch (message.type) {
-        case 'user-joined':
-          handleUserJoined(message.payload.userId);
-          break;
-        case 'offer':
-          handleOffer(message.payload.sdp, message.payload.userId);
-          break;
-        case 'answer':
-          handleAnswer(message.payload.sdp, message.payload.userId);
-          break;
-        case 'ice-candidate':
-          handleCandidate(message.payload.candidate, message.payload.userId);
-          break;
-        case 'user-left':
-          handleUserLeft(message.payload.userId);
-          break;
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnectionStatus('disconnected');
-    };
+    connectWebSocket();
 
     return () => {
-      ws.close();
+      isComponentMounted = false;
+      clearTimeout(reconnectTimeout);
+      clearInterval(pingInterval);
+      if (ws) ws.close();
       peersRef.current.forEach(pc => pc.close());
       peersRef.current.clear();
       pendingCandidatesRef.current.clear();
     };
   }, [roomId, localStream, handleUserJoined, handleOffer, handleAnswer, handleCandidate, handleUserLeft]);
 
-  return { localStream, remoteStreams, connectionStatus, error };
+  return { localStream, remoteStreams, connectionStatus, error, toggleCamera };
 }
