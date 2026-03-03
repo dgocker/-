@@ -37,11 +37,14 @@ export function useWebRTC(roomId: string) {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isStreamReady, setIsStreamReady] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const userIdRef = useRef(Math.random().toString(36).substring(2, 15));
+  const leaveTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const addRemoteStream = useCallback((userId: string, stream: MediaStream) => {
     setRemoteStreams(prev => {
@@ -80,9 +83,25 @@ export function useWebRTC(roomId: string) {
       addRemoteStream(targetUserId, event.streams[0]);
     };
 
-    pc.onconnectionstatechange = () => {
+    pc.onconnectionstatechange = async () => {
       console.log(`Connection state with ${targetUserId}:`, pc.connectionState);
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      if (pc.connectionState === 'failed') {
+        console.log('Connection failed, attempting ICE restart...');
+        try {
+          const offer = await pc.createOffer({ iceRestart: true });
+          await pc.setLocalDescription(offer);
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'offer',
+              payload: { sdp: offer, targetUserId }
+            }));
+          }
+        } catch (err) {
+          console.error('ICE restart failed:', err);
+          removeRemoteStream(targetUserId);
+          peersRef.current.delete(targetUserId);
+        }
+      } else if (pc.connectionState === 'closed') {
         removeRemoteStream(targetUserId);
         peersRef.current.delete(targetUserId);
       }
@@ -100,6 +119,11 @@ export function useWebRTC(roomId: string) {
 
   const handleOffer = useCallback(async (offer: RTCSessionDescriptionInit, userId: string) => {
     try {
+      if (leaveTimeoutsRef.current.has(userId)) {
+        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
+        leaveTimeoutsRef.current.delete(userId);
+      }
+
       const pc = createPeerConnection(userId);
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       
@@ -129,6 +153,11 @@ export function useWebRTC(roomId: string) {
 
   const handleAnswer = useCallback(async (answer: RTCSessionDescriptionInit, userId: string) => {
     try {
+      if (leaveTimeoutsRef.current.has(userId)) {
+        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
+        leaveTimeoutsRef.current.delete(userId);
+      }
+
       const pc = peersRef.current.get(userId);
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
@@ -178,6 +207,12 @@ export function useWebRTC(roomId: string) {
   const handleUserJoined = useCallback(async (userId: string) => {
     console.log('User joined, creating offer for', userId);
     try {
+      if (leaveTimeoutsRef.current.has(userId)) {
+        clearTimeout(leaveTimeoutsRef.current.get(userId)!);
+        leaveTimeoutsRef.current.delete(userId);
+        console.log('User reconnected, cancelled leave timeout:', userId);
+      }
+
       const pc = createPeerConnection(userId);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -194,14 +229,25 @@ export function useWebRTC(roomId: string) {
   }, [createPeerConnection]);
 
   const handleUserLeft = useCallback((userId: string) => {
-    console.log('User left:', userId);
-    const pc = peersRef.current.get(userId);
-    if (pc) {
-      pc.close();
-      peersRef.current.delete(userId);
+    console.log('User left signaling, waiting to see if they reconnect:', userId);
+    
+    if (leaveTimeoutsRef.current.has(userId)) {
+      clearTimeout(leaveTimeoutsRef.current.get(userId)!);
     }
-    removeRemoteStream(userId);
-    pendingCandidatesRef.current.delete(userId);
+
+    const timeout = setTimeout(() => {
+      console.log('User did not reconnect, closing pc:', userId);
+      const pc = peersRef.current.get(userId);
+      if (pc) {
+        pc.close();
+        peersRef.current.delete(userId);
+      }
+      removeRemoteStream(userId);
+      pendingCandidatesRef.current.delete(userId);
+      leaveTimeoutsRef.current.delete(userId);
+    }, 10000);
+    
+    leaveTimeoutsRef.current.set(userId, timeout);
   }, [removeRemoteStream]);
 
   const toggleCamera = useCallback(async () => {
@@ -259,6 +305,7 @@ export function useWebRTC(roomId: string) {
         });
         setLocalStream(stream);
         localStreamRef.current = stream;
+        setIsStreamReady(true);
       } catch (err) {
         console.error('Error accessing media devices:', err);
         setError('Не удалось получить доступ к камере или микрофону. Пожалуйста, разрешите доступ в настройках браузера.');
@@ -275,7 +322,7 @@ export function useWebRTC(roomId: string) {
   }, []);
 
   useEffect(() => {
-    if (!roomId || !localStream) return;
+    if (!roomId || !isStreamReady) return;
 
     let ws: WebSocket;
     let pingInterval: NodeJS.Timeout;
@@ -293,7 +340,7 @@ export function useWebRTC(roomId: string) {
         setConnectionStatus('connected');
         ws.send(JSON.stringify({
           type: 'join-room',
-          payload: { roomId }
+          payload: { roomId, userId: userIdRef.current }
         }));
       };
 
@@ -357,8 +404,12 @@ export function useWebRTC(roomId: string) {
       peersRef.current.clear();
       pendingCandidatesRef.current.clear();
       setRemoteStreams(new Map());
+      
+      // Clear all leave timeouts
+      leaveTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      leaveTimeoutsRef.current.clear();
     };
-  }, [roomId, localStream, handleUserJoined, handleOffer, handleAnswer, handleCandidate, handleUserLeft]);
+  }, [roomId, isStreamReady, handleUserJoined, handleOffer, handleAnswer, handleCandidate, handleUserLeft]);
 
   return { localStream, remoteStreams, connectionStatus, error, toggleCamera };
 }

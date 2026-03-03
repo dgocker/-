@@ -39,8 +39,9 @@ async function startServer() {
             break;
           }
           case "join-room": {
-            const { roomId } = payload;
+            const { roomId, userId } = payload;
             ws.roomId = roomId;
+            ws.id = userId || ws.id; // Use client provided ID if available
             
             if (!rooms.has(roomId)) {
               rooms.set(roomId, new Set());
