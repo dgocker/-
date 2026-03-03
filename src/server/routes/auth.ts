@@ -35,7 +35,7 @@ function verifyTelegramWebApp(initData: string, botToken: string) {
   return calculatedHash === hash;
 }
 
-router.post('/telegram-webapp', (req, res) => {
+router.post('/telegram-webapp', async (req, res) => {
   const { initData, inviteCode } = req.body;
 
   if (!TELEGRAM_BOT_TOKEN) {
@@ -43,7 +43,7 @@ router.post('/telegram-webapp', (req, res) => {
     if (process.env.NODE_ENV !== 'production') {
       // Mock user for dev
       const user = { id: 12345, first_name: 'Dev', last_name: 'User', username: 'devuser', photo_url: '' };
-      return handleUserLogin(user, inviteCode, res);
+      return await handleUserLogin(user, inviteCode, res);
     }
     return res.status(500).json({ error: 'Bot token not configured' });
   }
@@ -57,14 +57,14 @@ router.post('/telegram-webapp', (req, res) => {
   const urlParams = new URLSearchParams(initData);
   const userData = JSON.parse(urlParams.get('user') || '{}');
   
-  handleUserLogin(userData, inviteCode, res);
+  await handleUserLogin(userData, inviteCode, res);
 });
 
-function handleUserLogin(authData: any, inviteCode: string, res: any) {
+async function handleUserLogin(authData: any, inviteCode: string, res: any) {
   const { id: telegram_id, first_name, last_name, username, photo_url } = authData;
 
   // Check if user exists
-  let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegram_id) as any;
+  let user = await db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegram_id) as any;
 
   const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
   const expectedRole = (adminTelegramId && telegram_id.toString() === adminTelegramId) ? 'admin' : 'user';
@@ -77,15 +77,15 @@ function handleUserLogin(authData: any, inviteCode: string, res: any) {
         INSERT INTO users (telegram_id, first_name, last_name, username, photo_url, role)
         VALUES (?, ?, ?, ?, ?, 'admin')
       `);
-      const info = stmt.run(telegram_id, first_name, last_name, username, photo_url);
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
+      const info = await stmt.run(telegram_id, first_name, last_name, username, photo_url);
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
     } else {
       // Need an invite code
       if (!inviteCode) {
         return res.status(403).json({ error: 'Требуется код приглашения для новых пользователей' });
       }
 
-      const invite = db.prepare('SELECT * FROM app_invites WHERE code = ? AND used_by IS NULL').get(inviteCode) as any;
+      const invite = await db.prepare('SELECT * FROM app_invites WHERE code = ? AND used_by IS NULL').get(inviteCode) as any;
       if (!invite) {
         return res.status(403).json({ error: 'Недействительный или уже использованный код приглашения' });
       }
@@ -95,17 +95,17 @@ function handleUserLogin(authData: any, inviteCode: string, res: any) {
         INSERT INTO users (telegram_id, first_name, last_name, username, photo_url, role)
         VALUES (?, ?, ?, ?, ?, 'user')
       `);
-      const info = stmt.run(telegram_id, first_name, last_name, username, photo_url);
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
+      const info = await stmt.run(telegram_id, first_name, last_name, username, photo_url);
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
 
       // Mark invite as used
-      db.prepare('UPDATE app_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?')
+      await db.prepare('UPDATE app_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?')
         .run(user.id, invite.id);
     }
   } else {
     // Update role if it changed (e.g., admin was set in env later)
     if (user.role !== expectedRole && expectedRole === 'admin') {
-      db.prepare('UPDATE users SET role = ? WHERE id = ?').run(expectedRole, user.id);
+      await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(expectedRole, user.id);
       user.role = expectedRole;
     }
   }
@@ -116,7 +116,7 @@ function handleUserLogin(authData: any, inviteCode: string, res: any) {
   res.json({ token, user });
 }
 
-router.post('/telegram', (req, res) => {
+router.post('/telegram', async (req, res) => {
   const { authData, inviteCode } = req.body;
 
   let isValid = false;
@@ -131,7 +131,7 @@ router.post('/telegram', (req, res) => {
     return res.status(401).json({ error: 'Invalid Telegram authentication' });
   }
 
-  handleUserLogin(authData, inviteCode, res);
+  await handleUserLogin(authData, inviteCode, res);
 });
 
 router.get('/me', authenticateToken, (req: AuthRequest, res) => {

@@ -19,33 +19,33 @@ export function setupSocket(io: Server) {
     });
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     const userId = socket.data.user.id;
+    let friends: any[] = [];
     
     if (!onlineUsers.has(userId)) {
       onlineUsers.set(userId, new Set());
     }
     onlineUsers.get(userId)!.add(socket.id);
 
-    // Notify friends that this user is online
-    const friends = db.prepare(`
-      SELECT u.id 
-      FROM friends f
-      JOIN users u ON (f.user_id_1 = u.id AND f.user_id_2 = ?) OR (f.user_id_2 = u.id AND f.user_id_1 = ?)
-    `).all(userId, userId);
-
-    friends.forEach((friend: any) => {
-      const friendSockets = onlineUsers.get(friend.id);
-      if (friendSockets) {
-        friendSockets.forEach(socketId => {
-          io.to(socketId).emit('friend_online', { userId });
-        });
+    socket.on('disconnect', () => {
+      const userSockets = onlineUsers.get(userId);
+      if (userSockets) {
+        userSockets.delete(socket.id);
+        if (userSockets.size === 0) {
+          onlineUsers.delete(userId);
+          // Notify friends
+          friends.forEach((friend: any) => {
+            const friendSockets = onlineUsers.get(friend.id);
+            if (friendSockets) {
+              friendSockets.forEach(socketId => {
+                io.to(socketId).emit('friend_offline', { userId });
+              });
+            }
+          });
+        }
       }
     });
-
-    // Send current online friends to the connected user
-    const onlineFriends = friends.filter((f: any) => onlineUsers.has(f.id)).map((f: any) => f.id);
-    socket.emit('online_friends', onlineFriends);
 
     // WebRTC Signaling
     socket.on('call_user', (data) => {
@@ -118,23 +118,28 @@ export function setupSocket(io: Server) {
       }
     });
 
-    socket.on('disconnect', () => {
-      const userSockets = onlineUsers.get(userId);
-      if (userSockets) {
-        userSockets.delete(socket.id);
-        if (userSockets.size === 0) {
-          onlineUsers.delete(userId);
-          // Notify friends
-          friends.forEach((friend: any) => {
-            const friendSockets = onlineUsers.get(friend.id);
-            if (friendSockets) {
-              friendSockets.forEach(socketId => {
-                io.to(socketId).emit('friend_offline', { userId });
-              });
-            }
+    try {
+      // Notify friends that this user is online
+      friends = await db.prepare(`
+        SELECT u.id 
+        FROM friends f
+        JOIN users u ON (f.user_id_1 = u.id AND f.user_id_2 = ?) OR (f.user_id_2 = u.id AND f.user_id_1 = ?)
+      `).all(userId, userId);
+
+      friends.forEach((friend: any) => {
+        const friendSockets = onlineUsers.get(friend.id);
+        if (friendSockets) {
+          friendSockets.forEach(socketId => {
+            io.to(socketId).emit('friend_online', { userId });
           });
         }
-      }
-    });
+      });
+
+      // Send current online friends to the connected user
+      const onlineFriends = friends.filter((f: any) => onlineUsers.has(f.id)).map((f: any) => f.id);
+      socket.emit('online_friends', onlineFriends);
+    } catch (err) {
+      console.error('Error fetching friends for socket:', err);
+    }
   });
 }

@@ -14,15 +14,20 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
 
   if (token == null) return res.sendStatus(401);
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+  jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
     if (err) return res.sendStatus(403);
     
-    // Fetch full user from db
-    const dbUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
-    if (!dbUser) return res.sendStatus(403);
+    try {
+      // Fetch full user from db
+      const dbUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id) as any;
+      if (!dbUser) return res.sendStatus(403);
 
-    req.user = dbUser;
-    next();
+      req.user = dbUser;
+      next();
+    } catch (e) {
+      console.error('Auth middleware error:', e);
+      res.sendStatus(500);
+    }
   });
 }
 

@@ -21,7 +21,7 @@ async function startServer() {
   const httpServer = createServer(app);
   
   // Initialize DB
-  initDb();
+  await initDb();
 
   // Setup Socket.io
   const io = new Server(httpServer, {

@@ -8,16 +8,16 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(requireAdmin);
 
-router.post('/invites', (req: AuthRequest, res) => {
+router.post('/invites', async (req: AuthRequest, res) => {
   const code = uuidv4();
   const stmt = db.prepare('INSERT INTO app_invites (code, created_by) VALUES (?, ?)');
-  const info = stmt.run(code, req.user.id);
-  const invite = db.prepare('SELECT * FROM app_invites WHERE id = ?').get(info.lastInsertRowid) as any;
+  const info = await stmt.run(code, req.user.id);
+  const invite = await db.prepare('SELECT * FROM app_invites WHERE id = ?').get(info.lastInsertRowid) as any;
   res.json({ invite });
 });
 
-router.get('/invites', (req: AuthRequest, res) => {
-  const invites = db.prepare(`
+router.get('/invites', async (req: AuthRequest, res) => {
+  const invites = await db.prepare(`
     SELECT a.*, u.username as used_by_username 
     FROM app_invites a 
     LEFT JOIN users u ON a.used_by = u.id
