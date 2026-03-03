@@ -1,0 +1,5 @@
+{
+  "name": "SimpleVideo",
+  "description": "A simple, secure web-based video chat optimized for smartphones.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
