@@ -46,25 +46,29 @@ class PostgresDB {
 
   async run(sql: string, ...params: any[]) {
     const convertedSql = this.convertSql(sql);
-    // For INSERT returning id, we need to append RETURNING id if it's an insert
-    // But this is tricky with generic run.
-    // We'll handle specific cases or just return rowCount.
-    // If it's an INSERT, we might want to append 'RETURNING id' automatically?
-    // Or we rely on the caller to use RETURNING for PG.
-    // Let's try to append RETURNING id if it looks like an INSERT and doesn't have RETURNING.
     
     let finalSql = convertedSql;
     const isInsert = /^\s*INSERT\s/i.test(finalSql);
-    if (isInsert && !/RETURNING/i.test(finalSql)) {
+    // friends table has composite PK and no 'id' column
+    const isFriendsTable = /INSERT\s+INTO\s+friends\s+/i.test(finalSql);
+    
+    if (isInsert && !/RETURNING/i.test(finalSql) && !isFriendsTable) {
         finalSql += ' RETURNING id';
     }
 
-    const res = await this.pool.query(finalSql, params);
-    
-    return {
-      lastInsertRowid: isInsert && res.rows[0] ? res.rows[0].id : 0,
-      changes: res.rowCount || 0
-    };
+    try {
+      const res = await this.pool.query(finalSql, params);
+      
+      return {
+        lastInsertRowid: isInsert && res.rows[0] ? res.rows[0].id : 0,
+        changes: res.rowCount || 0
+      };
+    } catch (error) {
+      console.error('Database Error in run():', error);
+      console.error('Failed SQL:', finalSql);
+      console.error('Params:', params);
+      throw error;
+    }
   }
 
   // Mock prepare to ease migration, but it will return async functions
