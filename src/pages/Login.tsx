@@ -80,7 +80,12 @@ export default function Login() {
       
       // Check for invite code in start_param
       const startParam = tg.initDataUnsafe?.start_param;
-      const activeInviteCode = startParam || localStorage.getItem('pending_invite_code');
+      let activeInviteCode = startParam || localStorage.getItem('pending_invite_code');
+      
+      // Handle 'friend-' prefix if present in start_param
+      if (activeInviteCode && activeInviteCode.startsWith('friend-')) {
+          activeInviteCode = activeInviteCode.replace('friend-', '');
+      }
       
       if (startParam) {
         setHasInvite(true);

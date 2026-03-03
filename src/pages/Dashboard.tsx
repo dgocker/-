@@ -132,7 +132,11 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        const link = `${window.location.origin}/add-friend/${data.link.code}`;
+        // Use Telegram Web App deep link format
+        // Format: https://t.me/BOT_USERNAME/APP_NAME?startapp=friend-CODE
+        const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'Vid_dm_qwe_bot';
+        const appName = 'Call'; // Assuming 'Call' is the short name based on user request
+        const link = `https://t.me/${botName}/${appName}?startapp=friend-${data.link.code}`;
         
         if (navigator.share) {
           try {
