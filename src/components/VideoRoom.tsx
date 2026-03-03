@@ -183,8 +183,8 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
       {/* Local Video (PIP) */}
       <motion.div 
         drag
-        dragConstraints={constraints}
-        dragElastic={0}
+        dragConstraints={containerRef}
+        dragElastic={0.1}
         dragMomentum={false}
         className="absolute top-4 right-4 z-20 w-32 h-48 bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
       >
