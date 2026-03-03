@@ -8,6 +8,31 @@ interface VideoRoomProps {
   onLeave: () => void;
 }
 
+// Separate component for remote videos to handle aggressive cleanup
+function RemoteVideo({ stream }: { stream: MediaStream }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (el) {
+      el.srcObject = stream;
+    }
+    return () => {
+      // Aggressively clear srcObject to prevent memory leaks and browser hangs
+      if (el) el.srcObject = null;
+    };
+  }, [stream]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      className="w-full h-full object-cover"
+    />
+  );
+}
+
 export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
   const { localStream, remoteStreams, connectionStatus, error, toggleCamera } = useWebRTC(roomId);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -42,9 +67,14 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
   };
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    const el = localVideoRef.current;
+    if (el && localStream) {
+      el.srcObject = localStream;
     }
+    return () => {
+      // Aggressive cleanup to prevent iOS Safari media daemon crash
+      if (el) el.srcObject = null;
+    };
   }, [localStream]);
 
   const toggleMute = () => {
@@ -141,14 +171,7 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
         {remoteStreamsArray.length > 0 ? (
           remoteStreamsArray.map(([userId, stream]) => (
             <div key={userId} className="relative w-full h-full overflow-hidden bg-black">
-              <video
-                ref={(el) => {
-                  if (el) el.srcObject = stream;
-                }}
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-              />
+              <RemoteVideo stream={stream} />
             </div>
           ))
         ) : (

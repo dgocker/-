@@ -6,6 +6,21 @@ const STUN_SERVERS = {
     { urls: 'stun:global.stun.twilio.com:3478' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { 
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    { 
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    { 
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ],
 };
 
@@ -210,12 +225,15 @@ export function useWebRTC(roomId: string) {
       localStreamRef.current.addTrack(newVideoTrack);
       setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
       
-      peersRef.current.forEach(pc => {
-        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(newVideoTrack);
-        }
-      });
+      // Use Promise.allSettled to ensure we don't crash if one peer fails
+      await Promise.allSettled(
+        Array.from(peersRef.current.values()).map(async (pc) => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+          if (sender) {
+            await sender.replaceTrack(newVideoTrack);
+          }
+        })
+      );
       
       setFacingMode(newFacingMode);
     } catch (err) {
@@ -227,8 +245,17 @@ export function useWebRTC(roomId: string) {
     const startLocalStream = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'user' }, 
-          audio: true 
+          video: { 
+            facingMode: 'user',
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            frameRate: { ideal: 30, max: 60 }
+          }, 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
         });
         setLocalStream(stream);
         localStreamRef.current = stream;
@@ -317,10 +344,19 @@ export function useWebRTC(roomId: string) {
       isComponentMounted = false;
       clearTimeout(reconnectTimeout);
       clearInterval(pingInterval);
-      if (ws) ws.close();
-      peersRef.current.forEach(pc => pc.close());
+      if (ws) {
+        ws.onclose = null; // Prevent reconnect loop on unmount
+        ws.close();
+      }
+      peersRef.current.forEach(pc => {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.close();
+      });
       peersRef.current.clear();
       pendingCandidatesRef.current.clear();
+      setRemoteStreams(new Map());
     };
   }, [roomId, localStream, handleUserJoined, handleOffer, handleAnswer, handleCandidate, handleUserLeft]);
 
