@@ -17,13 +17,19 @@ export default function Login() {
   const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const [hasInvite, setHasInvite] = useState(false);
+
   useEffect(() => {
     // 1. Immediately save invite code from URL to localStorage if present
     const searchParams = new URLSearchParams(location.search);
     const urlInviteCode = searchParams.get('invite');
+    const storedInviteCode = localStorage.getItem('pending_invite_code');
     
     if (urlInviteCode) {
       localStorage.setItem('pending_invite_code', urlInviteCode);
+      setHasInvite(true);
+    } else if (storedInviteCode) {
+      setHasInvite(true);
     }
 
     // 2. Setup Telegram widget
@@ -73,9 +79,6 @@ export default function Login() {
       containerRef.current.appendChild(script);
     }
   }, [location, navigate, setToken, setUser]);
-
-  // Visual helper to show if invite code is present
-  const hasInvite = new URLSearchParams(location.search).get('invite') || localStorage.getItem('pending_invite_code');
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-zinc-950">

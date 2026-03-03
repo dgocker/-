@@ -138,7 +138,7 @@ export default function Dashboard() {
           try {
             await navigator.share({
               title: 'Добавить в друзья',
-              text: 'Присоединяйся ко мне в приложении для видеозвонков!',
+              text: 'Привет! Давай общаться по видеосвязи. Переходи по ссылке, чтобы добавить меня в друзья:',
               url: link
             });
           } catch (err) {

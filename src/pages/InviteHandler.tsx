@@ -12,9 +12,13 @@ export default function InviteHandler() {
       navigate('/');
     } else {
       if (code) {
+        // Save to local storage
         localStorage.setItem('pending_invite_code', code);
+        // Force hard redirect to ensure URL params are visible to the Login page immediately
+        window.location.replace(`/login?invite=${code}`);
+      } else {
+        navigate('/login');
       }
-      navigate(`/login?invite=${code}`);
     }
   }, [code, navigate, token]);
 
