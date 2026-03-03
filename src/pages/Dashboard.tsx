@@ -84,6 +84,7 @@ export default function Dashboard() {
     });
 
     socket.on('call_accepted', ({ from }) => {
+      console.log('Call accepted by', from);
       setCallActive(true);
       setActiveCallUserId(from);
       initiateCall(from);
