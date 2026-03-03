@@ -68,6 +68,40 @@ export default function Dashboard() {
       return;
     }
 
+    // Check for start_param from Telegram Web App for friend adding
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg && tg.initDataUnsafe?.start_param) {
+      const startParam = tg.initDataUnsafe.start_param;
+      if (startParam.startsWith('friend-')) {
+        const friendCode = startParam.replace('friend-', '');
+        
+        // Attempt to add friend
+        fetch('/api/friends/add', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` 
+          },
+          body: JSON.stringify({ code: friendCode })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            alert('Друг успешно добавлен!');
+            // Refresh friends list
+            fetch('/api/friends', {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            .then(res => res.json())
+            .then(data => setFriends(data.friends));
+          } else if (data.error && data.error !== 'Already friends' && data.error !== 'You cannot add yourself') {
+             alert(data.error);
+          }
+        })
+        .catch(err => console.error('Failed to add friend from start_param', err));
+      }
+    }
+
     // Fetch friends
     fetch('/api/friends', {
       headers: { Authorization: `Bearer ${token}` }
