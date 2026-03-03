@@ -369,12 +369,21 @@ export function useWebRTC(roomId: string) {
 
       ws.onclose = () => {
         console.log('WebSocket disconnected');
-        setConnectionStatus('disconnected');
+        
+        // Delay showing disconnected status to avoid flashing on brief network drops (e.g. during ICE gathering)
+        const disconnectTimeout = setTimeout(() => {
+          if (isComponentMounted && wsRef.current?.readyState !== WebSocket.OPEN) {
+            setConnectionStatus('disconnected');
+          }
+        }, 2000);
+
         clearInterval(pingInterval);
         
         if (isComponentMounted) {
           console.log('Attempting to reconnect in 3 seconds...');
-          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+          reconnectTimeout = setTimeout(() => {
+            connectWebSocket();
+          }, 3000);
         }
       };
 
