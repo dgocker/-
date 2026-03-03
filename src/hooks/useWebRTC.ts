@@ -168,5 +168,5 @@ export function useWebRTC(
     }
   }, []);
 
-  return { initiateCall, cleanup };
+  return { initiateCall, cleanup, peerConnection };
 }

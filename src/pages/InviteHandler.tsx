@@ -17,7 +17,7 @@ export default function InviteHandler() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-zinc-950 text-zinc-400">
-      Processing invite...
+      Обработка приглашения...
     </div>
   );
 }

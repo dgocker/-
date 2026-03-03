@@ -37,11 +37,11 @@ export default function Login() {
             setUser(data.user);
             navigate('/');
           } else {
-            alert(data.error || 'Login failed');
+            alert(data.error || 'Ошибка входа');
           }
         } catch (err) {
           console.error('Login error:', err);
-          alert('An error occurred during login.');
+          alert('Произошла ошибка при входе.');
         }
       }
     };
@@ -68,8 +68,8 @@ export default function Login() {
         animate={{ opacity: 1, y: 0 }}
         className="p-8 bg-zinc-900 rounded-2xl shadow-xl border border-zinc-800 text-center max-w-sm w-full"
       >
-        <h1 className="text-2xl font-semibold text-zinc-100 mb-2">Welcome</h1>
-        <p className="text-zinc-400 mb-8 text-sm">Sign in with Telegram to continue</p>
+        <h1 className="text-2xl font-semibold text-zinc-100 mb-2">Добро пожаловать</h1>
+        <p className="text-zinc-400 mb-8 text-sm">Войдите через Telegram для продолжения</p>
         
         <div ref={containerRef} className="flex justify-center min-h-[40px]">
           {/* Telegram widget will be injected here */}

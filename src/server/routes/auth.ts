@@ -39,12 +39,13 @@ router.post('/telegram', (req, res) => {
   // Check if user exists
   let user = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegram_id) as any;
 
+  const adminTelegramId = process.env.ADMIN_TELEGRAM_ID;
+  const expectedRole = (adminTelegramId && telegram_id.toString() === adminTelegramId) ? 'admin' : 'user';
+
   if (!user) {
-    // If not exists, they need an invite code unless they are the first user
-    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-    
-    if (userCount.count === 0) {
-      // First user becomes admin
+    // If not exists, they need an invite code unless they are the admin
+    if (expectedRole === 'admin') {
+      // Admin bypasses invite code
       const stmt = db.prepare(`
         INSERT INTO users (telegram_id, first_name, last_name, username, photo_url, role)
         VALUES (?, ?, ?, ?, ?, 'admin')
@@ -54,12 +55,12 @@ router.post('/telegram', (req, res) => {
     } else {
       // Need an invite code
       if (!inviteCode) {
-        return res.status(403).json({ error: 'Invite code required for new users' });
+        return res.status(403).json({ error: 'Требуется код приглашения для новых пользователей' });
       }
 
       const invite = db.prepare('SELECT * FROM app_invites WHERE code = ? AND used_by IS NULL').get(inviteCode) as any;
       if (!invite) {
-        return res.status(403).json({ error: 'Invalid or already used invite code' });
+        return res.status(403).json({ error: 'Недействительный или уже использованный код приглашения' });
       }
 
       // Create user
@@ -73,6 +74,12 @@ router.post('/telegram', (req, res) => {
       // Mark invite as used
       db.prepare('UPDATE app_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?')
         .run(user.id, invite.id);
+    }
+  } else {
+    // Update role if it changed (e.g., admin was set in env later)
+    if (user.role !== expectedRole && expectedRole === 'admin') {
+      db.prepare('UPDATE users SET role = ? WHERE id = ?').run(expectedRole, user.id);
+      user.role = expectedRole;
     }
   }
 

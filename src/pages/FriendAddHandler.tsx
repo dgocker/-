@@ -8,7 +8,7 @@ export default function FriendAddHandler() {
   const navigate = useNavigate();
   const { token } = useStore();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [message, setMessage] = useState('Adding friend...');
+  const [message, setMessage] = useState('Добавление друга...');
 
   useEffect(() => {
     if (!token) {
@@ -31,15 +31,15 @@ export default function FriendAddHandler() {
 
         if (res.ok) {
           setStatus('success');
-          setMessage('Friend added successfully!');
+          setMessage('Друг успешно добавлен!');
           setTimeout(() => navigate('/'), 2000);
         } else {
           setStatus('error');
-          setMessage(data.error || 'Failed to add friend');
+          setMessage(data.error || 'Не удалось добавить друга');
         }
       } catch (err) {
         setStatus('error');
-        setMessage('An error occurred');
+        setMessage('Произошла ошибка');
       }
     };
 
@@ -57,8 +57,8 @@ export default function FriendAddHandler() {
           status === 'success' ? 'text-emerald-400' : 
           status === 'error' ? 'text-red-400' : 'text-zinc-100'
         }`}>
-          {status === 'loading' ? 'Processing...' : 
-           status === 'success' ? 'Success!' : 'Oops!'}
+          {status === 'loading' ? 'Обработка...' : 
+           status === 'success' ? 'Успешно!' : 'Ой!'}
         </h2>
         <p className="text-zinc-400">{message}</p>
         
@@ -67,7 +67,7 @@ export default function FriendAddHandler() {
             onClick={() => navigate('/')}
             className="mt-6 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-lg transition-colors"
           >
-            Go to Dashboard
+            На главную
           </button>
         )}
       </motion.div>

@@ -108,6 +108,16 @@ export function setupSocket(io: Server) {
       }
     });
 
+    socket.on('set_call_emojis', (data) => {
+      const { to, emojis } = data;
+      const targetSockets = onlineUsers.get(to);
+      if (targetSockets) {
+        targetSockets.forEach(socketId => {
+          io.to(socketId).emit('call_emojis', { emojis });
+        });
+      }
+    });
+
     socket.on('disconnect', () => {
       const userSockets = onlineUsers.get(userId);
       if (userSockets) {
