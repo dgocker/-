@@ -68,4 +68,19 @@ router.get('/', async (req: AuthRequest, res) => {
   }
 });
 
+router.delete('/:id', async (req: AuthRequest, res) => {
+  try {
+    const friendId = req.params.id;
+    await db.prepare(`
+      DELETE FROM friends 
+      WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)
+    `).run(req.user.id, friendId, friendId, req.user.id);
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error in DELETE /friends/:id:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

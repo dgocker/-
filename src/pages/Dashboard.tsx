@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X } from 'lucide-react';
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2 } from 'lucide-react';
 import { useWebRTC } from '../hooks/useWebRTC';
 
 const EMOJIS = ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🪲', '🪳', '🕷', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳', '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛', '🦏', '🐪', '🐫', '🦒', '🦘', '🐃', '🐂', '🐄', '🐎', '🐖', '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮', '🐕‍🦺', '🐈', '🐈‍⬛', '🪶', '🐓', '🦃', '🦤', '🦚', '🦜', '🦢', '🦩', '🕊', '🐇', '🦝', '🦨', '🦡', '🦦', '🦥', '🐁', '🐀', '🐿', '🦔'];
@@ -66,40 +66,6 @@ export default function Dashboard() {
     if (!token) {
       navigate('/login');
       return;
-    }
-
-    // Check for start_param from Telegram Web App for friend adding
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg && tg.initDataUnsafe?.start_param) {
-      const startParam = tg.initDataUnsafe.start_param;
-      if (startParam.startsWith('friend-')) {
-        const friendCode = startParam.replace('friend-', '');
-        
-        // Attempt to add friend
-        fetch('/api/friends/add', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-          },
-          body: JSON.stringify({ code: friendCode })
-        })
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            alert('Друг успешно добавлен!');
-            // Refresh friends list
-            fetch('/api/friends', {
-              headers: { Authorization: `Bearer ${token}` }
-            })
-            .then(res => res.json())
-            .then(data => setFriends(data.friends));
-          } else if (data.error && data.error !== 'Already friends' && data.error !== 'You cannot add yourself') {
-             alert(data.error);
-          }
-        })
-        .catch(err => console.error('Failed to add friend from start_param', err));
-      }
     }
 
     // Fetch friends
@@ -293,6 +259,28 @@ export default function Dashboard() {
     }
   };
 
+  const deleteFriend = async (friendId: number) => {
+    if (!confirm('Вы уверены, что хотите удалить этого друга?')) return;
+    
+    try {
+      const res = await fetch(`/api/friends/${friendId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        setFriends(friends.filter(f => f.id !== friendId));
+        if (socket) {
+          socket.emit('refresh_friends');
+        }
+      } else {
+        alert('Не удалось удалить друга');
+      }
+    } catch (err) {
+      console.error('Failed to delete friend', err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6 max-w-4xl mx-auto">
       <header className="flex items-center justify-between mb-12">
@@ -384,17 +372,26 @@ export default function Dashboard() {
                     </div>
                   </div>
                   
-                  <button 
-                    onClick={() => startCall(friend.id)}
-                    disabled={!isOnline || callActive}
-                    className={`p-3 rounded-full transition-colors ${
-                      isOnline && !callActive 
-                        ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' 
-                        : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                    }`}
-                  >
-                    <Video size={20} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => startCall(friend.id)}
+                      disabled={!isOnline || callActive}
+                      className={`p-3 rounded-full transition-colors ${
+                        isOnline && !callActive 
+                          ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' 
+                          : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <Video size={20} />
+                    </button>
+                    <button 
+                      onClick={() => deleteFriend(friend.id)}
+                      className="p-3 rounded-full bg-zinc-800 text-red-400 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                      title="Удалить друга"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
                 </motion.div>
               );
             })

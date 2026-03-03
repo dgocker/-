@@ -35,7 +35,8 @@ export function setupSocket(io: Server) {
         if (userSockets.size === 0) {
           onlineUsers.delete(userId);
           // Notify friends
-          friends.forEach((friend: any) => {
+          const friendsToNotify = socket.data.friends || [];
+          friendsToNotify.forEach((friend: any) => {
             const friendSockets = onlineUsers.get(friend.id);
             if (friendSockets) {
               friendSockets.forEach(socketId => {
@@ -119,27 +120,50 @@ export function setupSocket(io: Server) {
     });
 
     try {
-      // Notify friends that this user is online
-      friends = await db.prepare(`
-        SELECT u.id 
-        FROM friends f
-        JOIN users u ON (f.user_id_1 = u.id AND f.user_id_2 = ?) OR (f.user_id_2 = u.id AND f.user_id_1 = ?)
-      `).all(userId, userId);
-
-      friends.forEach((friend: any) => {
-        const friendSockets = onlineUsers.get(friend.id);
-        if (friendSockets) {
-          friendSockets.forEach(socketId => {
-            io.to(socketId).emit('friend_online', { userId });
-          });
-        }
-      });
-
-      // Send current online friends to the connected user
-      const onlineFriends = friends.filter((f: any) => onlineUsers.has(f.id)).map((f: any) => f.id);
-      socket.emit('online_friends', onlineFriends);
+      await updateSocketFriends(socket, userId);
     } catch (err) {
       console.error('Error fetching friends for socket:', err);
     }
+
+    socket.on('refresh_friends', async () => {
+      try {
+        await updateSocketFriends(socket, userId);
+      } catch (err) {
+        console.error('Error refreshing friends:', err);
+      }
+    });
   });
+}
+
+async function updateSocketFriends(socket: Socket, userId: number) {
+  // Notify friends that this user is online
+  const friends = await db.prepare(`
+    SELECT u.id 
+    FROM friends f
+    JOIN users u ON (f.user_id_1 = u.id AND f.user_id_2 = ?) OR (f.user_id_2 = u.id AND f.user_id_1 = ?)
+  `).all(userId, userId);
+
+  // Store friends list on socket for disconnect handler
+  socket.data.friends = friends;
+
+  // Update online status for friends
+  // We need to use io (socket.server) to emit to specific socket IDs
+  const io = socket.server;
+  
+  friends.forEach((friend: any) => {
+    // Check if friend is online
+    // We need to access the onlineUsers map which is in the closure of setupSocket
+    // But we are outside. We can pass onlineUsers or make it global in module scope (it is).
+    // onlineUsers is defined in module scope.
+    const friendSockets = onlineUsers.get(friend.id);
+    if (friendSockets) {
+      friendSockets.forEach(socketId => {
+        io.to(socketId).emit('friend_online', { userId });
+      });
+    }
+  });
+
+  // Send current online friends to the connected user
+  const onlineFriends = friends.filter((f: any) => onlineUsers.has(f.id)).map((f: any) => f.id);
+  socket.emit('online_friends', onlineFriends);
 }

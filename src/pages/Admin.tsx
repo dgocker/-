@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Shield, Plus, Copy, CheckCircle2, ArrowLeft, Share2 } from 'lucide-react';
+import { Shield, Plus, Copy, CheckCircle2, ArrowLeft, Share2, Trash2 } from 'lucide-react';
 
 export default function Admin() {
   const { user, token } = useStore();
   const navigate = useNavigate();
   const [invites, setInvites] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -17,6 +18,7 @@ export default function Admin() {
     }
 
     fetchInvites();
+    fetchUsers();
   }, [token, user, navigate]);
 
   const fetchInvites = async () => {
@@ -28,6 +30,38 @@ export default function Admin() {
       setInvites(data.invites);
     } catch (err) {
       console.error('Failed to fetch invites', err);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setUsers(data.users);
+    } catch (err) {
+      console.error('Failed to fetch users', err);
+    }
+  };
+
+  const deleteUser = async (userId: number) => {
+    if (!confirm('Вы уверены, что хотите удалить этого пользователя? Это действие необратимо.')) return;
+    
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        setUsers(users.filter(u => u.id !== userId));
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Не удалось удалить пользователя');
+      }
+    } catch (err) {
+      console.error('Failed to delete user', err);
     }
   };
 
@@ -143,6 +177,59 @@ export default function Admin() {
                   >
                     {copiedId === invite.id ? <CheckCircle2 size={18} /> : <Share2 size={18} />}
                   </button>
+                </motion.div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden mt-8">
+          <div className="p-6 border-b border-zinc-800">
+            <h2 className="text-lg font-medium">Пользователи</h2>
+            <p className="text-sm text-zinc-400 mt-1">
+              Управление зарегистрированными пользователями.
+            </p>
+          </div>
+          
+          <div className="divide-y divide-zinc-800/50">
+            {users.length === 0 ? (
+              <div className="p-8 text-center text-zinc-500">
+                Пользователей нет.
+              </div>
+            ) : (
+              users.map((u) => (
+                <motion.div 
+                  key={u.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="p-4 flex items-center justify-between hover:bg-zinc-800/30 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    {u.photo_url ? (
+                      <img src={u.photo_url} alt={u.first_name} className="w-10 h-10 rounded-full" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center">
+                        <span className="text-lg font-medium">{u.first_name?.[0]}</span>
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-medium flex items-center gap-2">
+                        {u.first_name} {u.last_name}
+                        {u.role === 'admin' && <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">Admin</span>}
+                      </p>
+                      <p className="text-xs text-zinc-400">@{u.username} • ID: {u.id}</p>
+                    </div>
+                  </div>
+                  
+                  {u.id !== user?.id && (
+                    <button 
+                      onClick={() => deleteUser(u.id)}
+                      className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                      title="Удалить пользователя"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
                 </motion.div>
               ))
             )}

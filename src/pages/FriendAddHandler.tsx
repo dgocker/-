@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { motion } from 'framer-motion';
+import { io } from 'socket.io-client';
 
 export default function FriendAddHandler() {
   const { code } = useParams();
@@ -32,6 +33,13 @@ export default function FriendAddHandler() {
         if (res.ok) {
           setStatus('success');
           setMessage('Друг успешно добавлен!');
+          
+          // Notify socket to refresh friends list
+          const socket = io({
+             auth: { token }
+          });
+          socket.emit('refresh_friends');
+          
           setTimeout(() => navigate('/'), 2000);
         } else {
           setStatus('error');
