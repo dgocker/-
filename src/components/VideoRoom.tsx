@@ -16,6 +16,8 @@ export function VideoRoom({ roomId, onLeave }: VideoRoomProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout>(null);
   const [constraints, setConstraints] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
 
   useEffect(() => {
