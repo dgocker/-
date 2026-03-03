@@ -3,14 +3,19 @@ import { createServer as createViteServer } from "vite";
 import { WebSocketServer, WebSocket } from "ws";
 import http from "http";
 import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
   const server = http.createServer(app);
 
   // WebSocket Signaling Server
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ noServer: true });
 
   interface Client extends WebSocket {
     id: string;
@@ -100,6 +105,14 @@ async function startServer() {
     });
   });
 
+  server.on('upgrade', (request, socket, head) => {
+    if (request.url?.startsWith('/ws')) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -113,10 +126,13 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // In production, serve static files (if built)
-    // For this environment, we mostly rely on dev mode, but good practice:
-    const path = await import("path");
+    // In production, serve static files
     app.use(express.static(path.resolve(__dirname, "dist")));
+    
+    // SPA fallback
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
+    });
   }
 
   server.listen(PORT, "0.0.0.0", () => {
