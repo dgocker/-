@@ -62,6 +62,12 @@ export function useWebRTC(
     };
 
     const createPeerConnection = (targetSocketId?: string) => {
+      if (peerConnection.current && peerConnection.current.connectionState !== 'closed') {
+        console.warn('Old PC still alive, forcing close...');
+        peerConnection.current.close();
+        peerConnection.current = null;
+      }
+
       // Reset state for new connection
       iceCandidatesQueue.current = [];
       isRemoteDescriptionSet.current = false;
@@ -252,6 +258,13 @@ export function useWebRTC(
       return;
     }
     
+    if (peerConnection.current && peerConnection.current.connectionState !== 'closed') {
+      console.warn('Old PC still alive, forcing close...');
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+    await new Promise(r => setTimeout(r, 50)); // micro-pause
+    
     // Reset state for new connection
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
@@ -389,9 +402,20 @@ export function useWebRTC(
   }, []);
 
   const cleanup = useCallback(() => {
+    console.log('🔥 FULL CLEANUP started');
+
     if (peerConnection.current) {
       peerConnection.current.getReceivers().forEach(receiver => {
-        if (receiver.track) receiver.track.stop();
+        if (receiver.track) {
+          receiver.track.stop();
+          receiver.track.enabled = false;
+        }
+      });
+      peerConnection.current.getSenders().forEach(sender => {
+        if (sender.track) {
+          sender.track.stop();
+          sender.track.enabled = false;
+        }
       });
       peerConnection.current.close();
       peerConnection.current = null;
@@ -409,6 +433,7 @@ export function useWebRTC(
     restartAttemptsRef.current = 0;
 
     setConnectionState('closed');
+    setRemoteStreamRef.current(null);
   }, []);
 
   return { initiateCall, cleanup, peerConnection, connectionState };

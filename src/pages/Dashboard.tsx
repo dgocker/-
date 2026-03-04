@@ -82,11 +82,15 @@ export default function Dashboard() {
     setActiveCallSocketId(null);
     setCallEmojis([]);
     
-    setRemoteStream(null);
     setIsAudioMuted(false);
     setIsVideoMuted(false);
     setFacingMode('user');
     setAutoplayFailed(false);
+
+    setTimeout(() => {
+      setRemoteStream(null);
+      setLocalStream(null);
+    }, 100);
   };
 
   const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
@@ -424,8 +428,13 @@ export default function Dashboard() {
     } else if (activeCallUserId) {
       socket.emit('end_call', { to: activeCallUserId }); // fallback
     }
-    handleCallEnded();
+    
     cleanup();
+    handleCallEnded();
+    
+    setTimeout(() => {
+      if (peerConnection.current) peerConnection.current = null;
+    }, 150);
   };
 
   const toggleAudio = () => {
