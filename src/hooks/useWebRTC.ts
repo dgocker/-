@@ -12,6 +12,10 @@ export function useWebRTC(
   const onCallEndedRef = useRef(onCallEnded);
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescriptionSet = useRef(false);
+  const activeSocketIdRef = useRef<string | null>(null);
+  const isCallerRef = useRef<boolean>(false);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const restartAttemptsRef = useRef<number>(0);
 
   const [connectionState, setConnectionState] = useState<string>('new');
 
@@ -40,11 +44,31 @@ export function useWebRTC(
       }
     };
 
+    const restartIce = async (pc: RTCPeerConnection, toSocketId: string) => {
+      if (restartAttemptsRef.current >= 3) {
+        console.warn('Max ICE restart attempts reached. Giving up.');
+        return;
+      }
+      
+      try {
+        restartAttemptsRef.current += 1;
+        console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
+        const offer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(offer);
+        socketRef.current.emit('webrtc_offer', { offer, toSocketId });
+      } catch (e) {
+        console.error('Error during ICE restart:', e);
+      }
+    };
+
     const createPeerConnection = (targetSocketId?: string) => {
       // Reset state for new connection
       iceCandidatesQueue.current = [];
       isRemoteDescriptionSet.current = false;
+      restartAttemptsRef.current = 0;
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       setConnectionState('new');
+      if (targetSocketId) activeSocketIdRef.current = targetSocketId;
 
       // Configure ICE servers
       let iceServers: RTCIceServer[] = [];
@@ -109,6 +133,28 @@ export function useWebRTC(
       pc.oniceconnectionstatechange = () => {
         console.log('ICE Connection state changed:', pc.iceConnectionState);
         setConnectionState(pc.iceConnectionState); // Use ICE state for more granular feedback
+        
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          // Reset attempts on successful connection
+          restartAttemptsRef.current = 0;
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        }
+        
+        // Automatic ICE Restart on connection drop
+        if ((pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
+          console.log('Connection lost. Waiting to see if it recovers...');
+          
+          // Clear any existing timeout to prevent multiple restarts
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          
+          // Wait 5 seconds before attempting restart. 
+          // Often, 'disconnected' is temporary and WebRTC recovers on its own.
+          restartTimeoutRef.current = setTimeout(() => {
+            if (peerConnection.current && (peerConnection.current.iceConnectionState === 'disconnected' || peerConnection.current.iceConnectionState === 'failed')) {
+              restartIce(peerConnection.current, activeSocketIdRef.current!);
+            }
+          }, 5000);
+        }
       };
 
       if (localStreamRef.current) {
@@ -130,6 +176,7 @@ export function useWebRTC(
     const handleOffer = async ({ offer, from, fromSocketId }: any) => {
       console.log('Received WebRTC offer from', from);
       if (!peerConnection.current) {
+        isCallerRef.current = false;
         peerConnection.current = createPeerConnection(fromSocketId);
       }
       try {
@@ -196,6 +243,10 @@ export function useWebRTC(
     // Reset state for new connection
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
+    restartAttemptsRef.current = 0;
+    if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+    activeSocketIdRef.current = toSocketId;
+    isCallerRef.current = true;
     
     console.log('Initiating call to', toSocketId);
     
@@ -262,6 +313,37 @@ export function useWebRTC(
     peerConnection.current.oniceconnectionstatechange = () => {
       console.log('ICE Connection state changed:', peerConnection.current?.iceConnectionState);
       setConnectionState(peerConnection.current?.iceConnectionState || 'closed');
+      
+      if (peerConnection.current?.iceConnectionState === 'connected' || peerConnection.current?.iceConnectionState === 'completed') {
+        restartAttemptsRef.current = 0;
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      }
+      
+      // Automatic ICE Restart on connection drop
+      if ((peerConnection.current?.iceConnectionState === 'disconnected' || peerConnection.current?.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
+        console.log('Connection lost. Waiting to see if it recovers...');
+        
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        
+        restartTimeoutRef.current = setTimeout(() => {
+          if (peerConnection.current && (peerConnection.current.iceConnectionState === 'disconnected' || peerConnection.current.iceConnectionState === 'failed')) {
+            if (restartAttemptsRef.current >= 3) {
+              console.warn('Max ICE restart attempts reached. Giving up.');
+              return;
+            }
+            try {
+              restartAttemptsRef.current += 1;
+              console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
+              peerConnection.current.createOffer({ iceRestart: true }).then(offer => {
+                peerConnection.current?.setLocalDescription(offer);
+                currentSocket.emit('webrtc_offer', { offer, toSocketId: activeSocketIdRef.current });
+              });
+            } catch (e) {
+              console.error('Error during ICE restart:', e);
+            }
+          }
+        }, 5000);
+      }
     };
 
     if (localStreamRef.current) {
@@ -294,6 +376,9 @@ export function useWebRTC(
     if (peerConnection.current) {
       peerConnection.current.close();
       peerConnection.current = null;
+    }
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
     }
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
