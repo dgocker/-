@@ -90,7 +90,7 @@ export default function Dashboard() {
         });
       }
     }
-  }, [remoteStream]);
+  }, [remoteStream, callActive]);
 
   const handleManualPlay = () => {
     if (remoteVideoRef.current) {
@@ -221,12 +221,9 @@ export default function Dashboard() {
       setActiveCallUserId(from);
       setActiveCallSocketId(fromSocketId);
       
-      // Add a small delay before initiating the call to ensure the other side is fully ready
-      // and to prevent race conditions with ICE candidates
-      setTimeout(() => {
-        console.log('Initiating call after delay...');
-        initiateCall(fromSocketId);
-      }, 500);
+      // Initiate call immediately to prevent race conditions
+      console.log('Initiating call immediately...');
+      initiateCall(fromSocketId);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
@@ -639,10 +636,10 @@ export default function Dashboard() {
                     {connectionState === 'new' && 'Инициализация...'}
                     {connectionState === 'checking' && 'Поиск пути (NAT)...'}
                     {connectionState === 'connected' && 'Подключено!'}
-                    {connectionState === 'completed' && 'Соединение установлено'}
+                    {connectionState === 'completed' && 'Подключено!'}
                     {connectionState === 'failed' && 'Ошибка соединения (NAT)'}
-                    {connectionState === 'disconnected' && 'Отключено'}
-                    {connectionState === 'closed' && 'Подключение...'}
+                    {connectionState === 'disconnected' && 'Связь прервана, переподключение...'}
+                    {connectionState === 'closed' && 'Соединение завершено'}
                     {!['new', 'checking', 'connected', 'completed', 'failed', 'disconnected', 'closed'].includes(connectionState) && connectionState}
                   </p>
                   {connectionState === 'checking' && <div className="w-4 h-4 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />}
