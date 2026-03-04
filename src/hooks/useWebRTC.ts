@@ -25,204 +25,165 @@ export function useWebRTC(
     onCallEndedRef.current = onCallEnded;
   });
 
-  const getIceServers = useCallback((): RTCIceServer[] => {
-    let iceServers: RTCIceServer[] = [];
-    
-    const customStun = import.meta.env.VITE_STUN_URL;
-    if (customStun) iceServers.push({ urls: customStun });
-    
-    const turnUrls = import.meta.env.VITE_TURN_URL;
-    const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
-    if (turnUrls && turnUsername && turnCredential) {
-      iceServers.push({
-        urls: turnUrls.split(',').map((u: string) => u.trim()),
-        username: turnUsername,
-        credential: turnCredential
-      });
-    }
-    
-    iceServers.push(
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
-    );
-    
-    return iceServers;
-  }, []);
-
-  const restartIce = useCallback(async (pc: RTCPeerConnection, toSocketId: string) => {
-    if (restartAttemptsRef.current >= 3) {
-      console.warn('Max ICE restart attempts reached. Giving up.');
-      return;
-    }
-    
-    try {
-      restartAttemptsRef.current += 1;
-      console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-      if (socketRef.current) {
-        socketRef.current.emit('webrtc_offer', { offer, toSocketId });
-      }
-    } catch (e) {
-      console.error('Error during ICE restart:', e);
-    }
-  }, []);
-
-  const createPeerConnection = useCallback((targetSocketId?: string): RTCPeerConnection => {
-    // Reset state for new connection
-    isRemoteDescriptionSet.current = false;
-    restartAttemptsRef.current = 0;
-    if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-    setConnectionState('new');
-    
-    if (targetSocketId) activeSocketIdRef.current = targetSocketId;
-    
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    
-    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
-    
-    pc.onicecandidate = (event) => {
-      if (pc !== peerConnection.current) return;
-      if (event.candidate && socketRef.current) {
-        console.log('Sending ICE candidate');
-        socketRef.current.emit('webrtc_ice_candidate', { 
-          candidate: event.candidate, 
-          toSocketId: targetSocketId 
-        });
-      }
-    };
-    
-    pc.ontrack = (event) => {
-      if (pc !== peerConnection.current) return;
-      console.log('Received remote track');
-      setRemoteStreamRef.current(event.streams[0]);
-    };
-    
-    pc.onconnectionstatechange = () => {
-      if (pc !== peerConnection.current) return;
-      console.log('Connection state changed:', pc.connectionState);
-      setConnectionState(pc.connectionState);
-      if (pc.connectionState === 'closed') {
-        onCallEndedRef.current();
-      }
-    };
-    
-    pc.oniceconnectionstatechange = () => {
-      if (pc !== peerConnection.current) return;
-      console.log('ICE Connection state changed:', pc.iceConnectionState);
-      setConnectionState(pc.iceConnectionState);
-      
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        restartAttemptsRef.current = 0;
-        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-      }
-      
-      if ((pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') 
-          && isCallerRef.current && activeSocketIdRef.current) {
-        console.log('Connection lost. Waiting to see if it recovers...');
-        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-        restartTimeoutRef.current = setTimeout(() => {
-          if (peerConnection.current && 
-              (peerConnection.current.iceConnectionState === 'disconnected' || 
-               peerConnection.current.iceConnectionState === 'failed')) {
-            restartIce(peerConnection.current, activeSocketIdRef.current!);
-          }
-        }, 5000);
-      }
-    };
-    
-    // Add tracks immediately upon creation
-    if (localStreamRef.current) {
-      console.log('Adding local tracks to peer connection');
-      const tracks = localStreamRef.current.getTracks();
-      tracks.sort((a, b) => a.kind.localeCompare(b.kind));
-      tracks.forEach(track => pc.addTrack(track, localStreamRef.current!));
-    } else {
-      console.warn('No local stream available when creating peer connection');
-    }
-    
-    peerConnection.current = pc;
-    return pc;
-  }, [getIceServers, localStreamRef, restartIce]);
-
-  const processIceQueue = useCallback(async () => {
-    if (!peerConnection.current || !isRemoteDescriptionSet.current) return;
-    
-    while (iceCandidatesQueue.current.length > 0) {
-      const candidate = iceCandidatesQueue.current.shift();
-      if (candidate) {
-        try {
-          console.log('Processing queued ICE candidate');
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.error('Error adding queued ice candidate', e);
-        }
-      }
-    }
-  }, []);
-
-  const initiateCall = useCallback(async (toSocketId: string) => {
-    if (!socketRef.current) {
-      console.error('Socket is not initialized');
-      return;
-    }
-    
-    iceCandidatesQueue.current = [];
-    isCallerRef.current = true;
-    
-    console.log('Initiating call to', toSocketId);
-    
-    const pc = createPeerConnection(toSocketId);
-
-    try {
-      const offer = await pc.createOffer({ 
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true
-      });
-      await pc.setLocalDescription(offer);
-      socketRef.current.emit('webrtc_offer', { offer, toSocketId });
-    } catch (e) {
-      console.error('Error creating offer:', e);
-    }
-  }, [createPeerConnection]);
-
-  const cleanup = useCallback(() => {
-    console.log('WebRTC cleanup called');
-    
-    if (restartTimeoutRef.current) {
-      clearTimeout(restartTimeoutRef.current);
-      restartTimeoutRef.current = null;
-    }
-    
-    if (peerConnection.current) {
-      // Stop all tracks before closing
-      peerConnection.current.getSenders().forEach(sender => {
-        if (sender.track) {
-          sender.track.stop();
-        }
-      });
-      
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    
-    iceCandidatesQueue.current = [];
-    isRemoteDescriptionSet.current = false;
-    activeSocketIdRef.current = null;
-    isCallerRef.current = false;
-    setConnectionState('closed');
-  }, []);
-
   useEffect(() => {
     if (!socket) return;
+
+    const processIceQueue = async () => {
+      if (!peerConnection.current || !isRemoteDescriptionSet.current) return;
+      
+      while (iceCandidatesQueue.current.length > 0) {
+        const candidate = iceCandidatesQueue.current.shift();
+        if (candidate) {
+          try {
+            console.log('Processing queued ICE candidate');
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error('Error adding queued ice candidate', e);
+          }
+        }
+      }
+    };
+
+    const restartIce = async (pc: RTCPeerConnection, toSocketId: string) => {
+      if (restartAttemptsRef.current >= 3) {
+        console.warn('Max ICE restart attempts reached. Giving up.');
+        return;
+      }
+      
+      try {
+        restartAttemptsRef.current += 1;
+        console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
+        const offer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(offer);
+        socketRef.current.emit('webrtc_offer', { offer, toSocketId });
+      } catch (e) {
+        console.error('Error during ICE restart:', e);
+      }
+    };
+
+    const createPeerConnection = (targetSocketId?: string) => {
+      // Reset state for new connection
+      iceCandidatesQueue.current = [];
+      isRemoteDescriptionSet.current = false;
+      restartAttemptsRef.current = 0;
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+        restartTimeoutRef.current = null;
+      }
+      setConnectionState('new');
+      if (targetSocketId) activeSocketIdRef.current = targetSocketId;
+
+      // Configure ICE servers
+      let iceServers: RTCIceServer[] = [];
+
+      // Add custom STUN server if configured
+      const customStun = import.meta.env.VITE_STUN_URL;
+      if (customStun) {
+        console.log('Using custom STUN server:', customStun);
+        iceServers.push({ urls: customStun });
+      }
+
+      // Add TURN servers if configured
+      const turnUrls = import.meta.env.VITE_TURN_URL;
+      const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+      const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+      if (turnUrls && turnUsername && turnCredential) {
+        const urls = turnUrls.split(',').map((u: string) => u.trim());
+        console.log('Using custom TURN servers:', urls);
+        iceServers.push({
+          urls: urls,
+          username: turnUsername,
+          credential: turnCredential
+        });
+      }
+
+      // Always add public STUN servers as fallback (at the end)
+      iceServers.push(
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      );
+
+      if (peerConnection.current) {
+        peerConnection.current.close();
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: iceServers
+      });
+
+      pc.onicecandidate = (event) => {
+        if (pc !== peerConnection.current) return;
+        if (event.candidate) {
+          console.log('Sending ICE candidate');
+          socket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId: targetSocketId });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        if (pc !== peerConnection.current) return;
+        console.log('Received remote track');
+        setRemoteStreamRef.current(event.streams[0]);
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc !== peerConnection.current) return;
+        console.log('Connection state changed:', pc.connectionState);
+        setConnectionState(pc.connectionState);
+        // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
+        if (pc.connectionState === 'closed') {
+          onCallEndedRef.current();
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc !== peerConnection.current) return;
+        console.log('ICE Connection state changed:', pc.iceConnectionState);
+        setConnectionState(pc.iceConnectionState); // Use ICE state for more granular feedback
+        
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          // Reset attempts on successful connection
+          restartAttemptsRef.current = 0;
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        }
+        
+        // Automatic ICE Restart on connection drop
+        if ((pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
+          console.log('Connection lost. Waiting to see if it recovers...');
+          
+          // Clear any existing timeout to prevent multiple restarts
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          
+          // Wait 5 seconds before attempting restart. 
+          // Often, 'disconnected' is temporary and WebRTC recovers on its own.
+          restartTimeoutRef.current = setTimeout(() => {
+            if (peerConnection.current && (peerConnection.current.iceConnectionState === 'disconnected' || peerConnection.current.iceConnectionState === 'failed')) {
+              restartIce(peerConnection.current, activeSocketIdRef.current!);
+            }
+          }, 5000);
+        }
+      };
+
+      if (localStreamRef.current) {
+        console.log('Adding local tracks to peer connection');
+        const tracks = localStreamRef.current.getTracks();
+        // Sort tracks to ensure consistent m-line order (audio first, then video)
+        tracks.sort((a, b) => a.kind.localeCompare(b.kind));
+        
+        tracks.forEach(track => {
+          pc.addTrack(track, localStreamRef.current!);
+        });
+      } else {
+        console.warn('No local stream available when creating peer connection');
+      }
+
+      return pc;
+    };
 
     const handleOffer = async ({ offer, from, fromSocketId }: any) => {
       console.log('Received WebRTC offer from', from);
       
+      // If a peer connection already exists, close it to ensure a clean state for the new offer
       if (peerConnection.current) {
         console.warn('Received offer while PeerConnection exists. Closing existing connection.');
         peerConnection.current.close();
@@ -230,15 +191,15 @@ export function useWebRTC(
       }
 
       isCallerRef.current = false;
-      const pc = createPeerConnection(fromSocketId);
+      peerConnection.current = createPeerConnection(fromSocketId);
 
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
         isRemoteDescriptionSet.current = true;
         await processIceQueue();
         
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
         console.log('Sending WebRTC answer to', fromSocketId);
         socket.emit('webrtc_answer', { answer, toSocketId: fromSocketId });
       } catch (e) {
@@ -282,7 +243,173 @@ export function useWebRTC(
       socket.off('webrtc_answer', handleAnswer);
       socket.off('webrtc_ice_candidate', handleIceCandidate);
     };
-  }, [socket, createPeerConnection, processIceQueue]);
+  }, [socket]);
+
+  const initiateCall = useCallback(async (toSocketId: string) => {
+    const currentSocket = socketRef.current;
+    if (!currentSocket) {
+      console.error('Socket is not initialized');
+      return;
+    }
+    
+    // Reset state for new connection
+    iceCandidatesQueue.current = [];
+    isRemoteDescriptionSet.current = false;
+    restartAttemptsRef.current = 0;
+    if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+    activeSocketIdRef.current = toSocketId;
+    isCallerRef.current = true;
+    
+    console.log('Initiating call to', toSocketId);
+    
+    // Configure ICE servers
+    let iceServers: RTCIceServer[] = [];
+
+    // Add custom STUN server if configured
+    const customStun = import.meta.env.VITE_STUN_URL;
+    if (customStun) {
+      console.log('Using custom STUN server:', customStun);
+      iceServers.push({ urls: customStun });
+    }
+
+    // Add TURN servers if configured
+    const turnUrls = import.meta.env.VITE_TURN_URL;
+    const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+    if (turnUrls && turnUsername && turnCredential) {
+      const urls = turnUrls.split(',').map((u: string) => u.trim());
+      console.log('Using custom TURN servers:', urls);
+      iceServers.push({
+        urls: urls,
+        username: turnUsername,
+        credential: turnCredential
+      });
+    }
+
+    // Always add public STUN servers as fallback (at the end)
+    iceServers.push(
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    );
+
+    if (peerConnection.current) {
+      peerConnection.current.close();
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers: iceServers
+    });
+    peerConnection.current = pc;
+
+    pc.onicecandidate = (event) => {
+      if (pc !== peerConnection.current) return;
+      if (event.candidate) {
+        console.log('Sending ICE candidate to', toSocketId);
+        currentSocket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      if (pc !== peerConnection.current) return;
+      console.log('Received remote track');
+      setRemoteStreamRef.current(event.streams[0]);
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc !== peerConnection.current) return;
+      console.log('Connection state changed:', pc.connectionState);
+      setConnectionState(pc.connectionState);
+      // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
+      if (pc.connectionState === 'closed') {
+        onCallEndedRef.current();
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc !== peerConnection.current) return;
+      console.log('ICE Connection state changed:', pc.iceConnectionState);
+      setConnectionState(pc.iceConnectionState);
+      
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        restartAttemptsRef.current = 0;
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      }
+      
+      // Automatic ICE Restart on connection drop
+      if ((pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
+        console.log('Connection lost. Waiting to see if it recovers...');
+        
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        
+        restartTimeoutRef.current = setTimeout(() => {
+          if (pc === peerConnection.current && (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed')) {
+            if (restartAttemptsRef.current >= 3) {
+              console.warn('Max ICE restart attempts reached. Giving up.');
+              return;
+            }
+            try {
+              restartAttemptsRef.current += 1;
+              console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
+              pc.createOffer({ iceRestart: true }).then(offer => {
+                pc.setLocalDescription(offer);
+                currentSocket.emit('webrtc_offer', { offer, toSocketId: activeSocketIdRef.current });
+              });
+            } catch (e) {
+              console.error('Error during ICE restart:', e);
+            }
+          }
+        }, 5000);
+      }
+    };
+
+    if (localStreamRef.current) {
+      console.log('Adding local tracks to peer connection (initiate)');
+      const tracks = localStreamRef.current.getTracks();
+      // Sort tracks to ensure consistent m-line order (audio first, then video)
+      tracks.sort((a, b) => a.kind.localeCompare(b.kind));
+      
+      tracks.forEach(track => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    } else {
+      console.warn('No local stream available when initiating call');
+    }
+
+    try {
+      const offer = await pc.createOffer({ 
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
+      await pc.setLocalDescription(offer);
+      currentSocket.emit('webrtc_offer', { offer, toSocketId });
+    } catch (e) {
+      console.error('Error creating offer:', e);
+    }
+  }, []);
+
+  const cleanup = useCallback(() => {
+    if (peerConnection.current) {
+      peerConnection.current.getReceivers().forEach(receiver => {
+        if (receiver.track) receiver.track.stop();
+      });
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+
+    iceCandidatesQueue.current = [];
+    isRemoteDescriptionSet.current = false;
+    activeSocketIdRef.current = null;
+    isCallerRef.current = false;
+    restartAttemptsRef.current = 0;
+
+    setConnectionState('closed');
+  }, []);
 
   return { initiateCall, cleanup, peerConnection, connectionState };
 }

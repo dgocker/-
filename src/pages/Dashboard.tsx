@@ -41,8 +41,8 @@ export default function Dashboard() {
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
-  const [localVideoElement, setLocalVideoElement] = useState<HTMLVideoElement | null>(null);
-  const [remoteVideoElement, setRemoteVideoElement] = useState<HTMLVideoElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const constraintsRef = useRef<HTMLDivElement>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
 
@@ -52,11 +52,23 @@ export default function Dashboard() {
   };
 
   const handleCallEnded = () => {
+    // Explicitly clear video elements
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+      remoteVideoRef.current.pause();
+      remoteVideoRef.current.load(); // Force reset internal buffer
+    }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+      localVideoRef.current.pause();
+    }
+
     setCallActive(false);
     setIncomingCall(null);
     setActiveCallUserId(null);
     setActiveCallSocketId(null);
     setCallEmojis([]);
+    
     if (activeStreamRef.current) {
       activeStreamRef.current.getTracks().forEach(track => track.stop());
       activeStreamRef.current = null;
@@ -66,35 +78,65 @@ export default function Dashboard() {
     setIsAudioMuted(false);
     setIsVideoMuted(false);
     setFacingMode('user');
+    setAutoplayFailed(false);
   };
 
   const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
 
   useEffect(() => {
-    if (localVideoElement && localStream) {
-      localVideoElement.srcObject = localStream;
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream, localVideoElement]);
+  }, [localStream]);
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
 
-  useEffect(() => {
-    if (remoteVideoElement && remoteStream) {
-      remoteVideoElement.srcObject = remoteStream;
-      // Explicitly attempt to play the video to overcome browser autoplay policies
-      const playPromise = remoteVideoElement.play();
+  // Callback ref for remote video to handle race conditions
+  const setRemoteVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    remoteVideoRef.current = node;
+
+    if (node && remoteStream) {
+      node.srcObject = remoteStream;
+      const playPromise = node.play();
       if (playPromise !== undefined) {
-        playPromise.then(() => setAutoplayFailed(false)).catch(e => {
-          console.error("Remote video play failed (Autoplay policy):", e);
+        playPromise.catch(e => {
+          console.error("Remote video play failed:", e);
           setAutoplayFailed(true);
         });
       }
     }
-  }, [remoteStream, remoteVideoElement]);
+  }, [remoteStream]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      const playPromise = remoteVideoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => {
+          console.error("Remote video play failed (Autoplay policy):", e);
+          setAutoplayFailed(true);
+        });
+      }
+      
+      const handleLoaded = () => {
+        remoteVideoRef.current?.play().catch(e => {
+           console.error("Remote video play failed (loadedmetadata):", e);
+           setAutoplayFailed(true);
+        });
+      };
+      
+      remoteVideoRef.current.addEventListener('loadedmetadata', handleLoaded);
+      return () => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.removeEventListener('loadedmetadata', handleLoaded);
+        }
+      };
+    }
+  }, [remoteStream]);
 
   const handleManualPlay = () => {
-    if (remoteVideoElement) {
-      remoteVideoElement.play()
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.play()
         .then(() => setAutoplayFailed(false))
         .catch(console.error);
     }
@@ -226,7 +268,7 @@ export default function Dashboard() {
       setTimeout(() => {
         console.log('Initiating call after delay...');
         initiateCall(fromSocketId);
-      }, 500);
+      }, 800);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
@@ -325,6 +367,7 @@ export default function Dashboard() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
       setAndStoreLocalStream(stream);
       setCallActive(true);
+      setAutoplayFailed(false);
       setActiveCallUserId(friendId);
       
       socket.emit('call_user', {
@@ -348,6 +391,7 @@ export default function Dashboard() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
       setAndStoreLocalStream(stream);
       setCallActive(true);
+      setAutoplayFailed(false);
       setActiveCallUserId(incomingCall.from);
       setActiveCallSocketId(incomingCall.fromSocketId);
       
@@ -620,7 +664,8 @@ export default function Dashboard() {
               onClick={handleManualPlay}
             >
               <video 
-                ref={setRemoteVideoElement} 
+                key={remoteStream ? 'remote-stream-active' : 'remote-stream-loading'}
+                ref={setRemoteVideoRef} 
                 autoPlay 
                 playsInline 
                 className="w-full h-full object-cover"
@@ -661,7 +706,8 @@ export default function Dashboard() {
               style={{ bottom: 32, right: 32 }}
             >
                <video 
-                ref={setLocalVideoElement} 
+                key={localStream ? 'local-stream-active' : 'local-stream-loading'}
+                ref={localVideoRef} 
                 autoPlay 
                 playsInline 
                 muted 
