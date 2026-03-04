@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 export function useWebRTC(
   socket: any,
@@ -13,6 +13,8 @@ export function useWebRTC(
   const onCallEndedRef = useRef(onCallEnded);
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescriptionSet = useRef(false);
+
+  const [connectionState, setConnectionState] = useState<string>('new');
 
   useEffect(() => {
     socketRef.current = socket;
@@ -44,6 +46,7 @@ export function useWebRTC(
       // Reset state for new connection
       iceCandidatesQueue.current = [];
       isRemoteDescriptionSet.current = false;
+      setConnectionState('new');
 
       const pc = new RTCPeerConnection({
         iceServers: [
@@ -70,9 +73,15 @@ export function useWebRTC(
 
       pc.onconnectionstatechange = () => {
         console.log('Connection state changed:', pc.connectionState);
+        setConnectionState(pc.connectionState);
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
           onCallEndedRef.current();
         }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE Connection state changed:', pc.iceConnectionState);
+        setConnectionState(pc.iceConnectionState); // Use ICE state for more granular feedback
       };
 
       if (localStreamRef.current) {
@@ -187,9 +196,15 @@ export function useWebRTC(
 
     peerConnection.current.onconnectionstatechange = () => {
       console.log('Connection state changed:', peerConnection.current?.connectionState);
+      setConnectionState(peerConnection.current?.connectionState || 'closed');
       if (peerConnection.current?.connectionState === 'disconnected' || peerConnection.current?.connectionState === 'failed' || peerConnection.current?.connectionState === 'closed') {
         onCallEndedRef.current();
       }
+    };
+
+    peerConnection.current.oniceconnectionstatechange = () => {
+      console.log('ICE Connection state changed:', peerConnection.current?.iceConnectionState);
+      setConnectionState(peerConnection.current?.iceConnectionState || 'closed');
     };
 
     if (localStreamRef.current) {
@@ -206,7 +221,11 @@ export function useWebRTC(
     }
 
     try {
-      const offer = await peerConnection.current.createOffer({ iceRestart: true });
+      const offer = await peerConnection.current.createOffer({ 
+        iceRestart: true,
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
       await peerConnection.current.setLocalDescription(offer);
       currentSocket.emit('webrtc_offer', { offer, to });
     } catch (e) {
@@ -221,7 +240,8 @@ export function useWebRTC(
     }
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
+    setConnectionState('closed');
   }, []);
 
-  return { initiateCall, cleanup, peerConnection };
+  return { initiateCall, cleanup, peerConnection, connectionState };
 }

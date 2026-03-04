@@ -48,7 +48,7 @@ export default function Dashboard() {
     setFacingMode('user');
   };
 
-  const { initiateCall, cleanup, peerConnection } = useWebRTC(socket, localStream, setRemoteStream, handleCallEnded);
+  const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, localStream, setRemoteStream, handleCallEnded);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -521,7 +521,19 @@ export default function Dashboard() {
                 className="w-full h-full object-cover"
               />
               {!remoteStream && (
-                <p className="text-zinc-500 absolute">Соединение...</p>
+                <div className="absolute flex flex-col items-center gap-2">
+                  <p className="text-zinc-500">
+                    {connectionState === 'new' && 'Инициализация...'}
+                    {connectionState === 'checking' && 'Поиск пути (NAT)...'}
+                    {connectionState === 'connected' && 'Подключено!'}
+                    {connectionState === 'completed' && 'Соединение установлено'}
+                    {connectionState === 'failed' && 'Ошибка соединения (NAT)'}
+                    {connectionState === 'disconnected' && 'Отключено'}
+                    {connectionState === 'closed' && 'Завершено'}
+                    {!['new', 'checking', 'connected', 'completed', 'failed', 'disconnected', 'closed'].includes(connectionState) && connectionState}
+                  </p>
+                  {connectionState === 'checking' && <div className="w-4 h-4 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />}
+                </div>
               )}
             </div>
             
