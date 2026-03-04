@@ -63,7 +63,6 @@ export function useWebRTC(
 
     const createPeerConnection = (targetSocketId?: string) => {
       // Reset state for new connection
-      iceCandidatesQueue.current = [];
       isRemoteDescriptionSet.current = false;
       restartAttemptsRef.current = 0;
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
@@ -212,17 +211,15 @@ export function useWebRTC(
 
     const handleIceCandidate = async ({ candidate }: any) => {
       console.log('Received ICE candidate');
-      if (peerConnection.current) {
-        if (isRemoteDescriptionSet.current) {
-           try {
-             await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-           } catch (e) {
-             console.error('Error adding received ice candidate', e);
-           }
-        } else {
-           console.log('Queueing ICE candidate (remote description not set)');
-           iceCandidatesQueue.current.push(candidate);
-        }
+      if (peerConnection.current && isRemoteDescriptionSet.current) {
+         try {
+           await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+         } catch (e) {
+           console.error('Error adding received ice candidate', e);
+         }
+      } else {
+         console.log('Queueing ICE candidate (remote description not set or peer connection not created)');
+         iceCandidatesQueue.current.push(candidate);
       }
     };
 

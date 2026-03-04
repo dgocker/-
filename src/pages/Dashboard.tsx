@@ -258,6 +258,13 @@ export default function Dashboard() {
       ) {
         setIncomingCall(null);
       }
+      // Check if we are the caller and the person we are calling hung up before answering
+      else if (
+        activeCallUserIdRef.current === from && !callActiveRef.current
+      ) {
+         handleCallEnded();
+         cleanup();
+      }
       // Otherwise, ignore it! (It's from someone else we aren't talking to)
     });
 
