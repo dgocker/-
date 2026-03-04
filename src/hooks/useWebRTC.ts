@@ -2,13 +2,12 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 
 export function useWebRTC(
   socket: any,
-  localStream: MediaStream | null,
+  localStreamRef: React.MutableRefObject<MediaStream | null>,
   setRemoteStream: (stream: MediaStream | null) => void,
   onCallEnded: () => void
 ) {
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef(socket);
-  const localStreamRef = useRef(localStream);
   const setRemoteStreamRef = useRef(setRemoteStream);
   const onCallEndedRef = useRef(onCallEnded);
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
@@ -18,7 +17,6 @@ export function useWebRTC(
 
   useEffect(() => {
     socketRef.current = socket;
-    localStreamRef.current = localStream;
     setRemoteStreamRef.current = setRemoteStream;
     onCallEndedRef.current = onCallEnded;
   });
@@ -42,7 +40,7 @@ export function useWebRTC(
       }
     };
 
-    const createPeerConnection = (targetUserId?: number) => {
+    const createPeerConnection = (targetSocketId?: string) => {
       // Reset state for new connection
       iceCandidatesQueue.current = [];
       isRemoteDescriptionSet.current = false;
@@ -90,7 +88,7 @@ export function useWebRTC(
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           console.log('Sending ICE candidate');
-          socket.emit('webrtc_ice_candidate', { candidate: event.candidate, to: targetUserId });
+          socket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId: targetSocketId });
         }
       };
 
@@ -129,10 +127,10 @@ export function useWebRTC(
       return pc;
     };
 
-    const handleOffer = async ({ offer, from }: any) => {
+    const handleOffer = async ({ offer, from, fromSocketId }: any) => {
       console.log('Received WebRTC offer from', from);
       if (!peerConnection.current) {
-        peerConnection.current = createPeerConnection(from);
+        peerConnection.current = createPeerConnection(fromSocketId);
       }
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
@@ -141,8 +139,8 @@ export function useWebRTC(
         
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
-        console.log('Sending WebRTC answer to', from);
-        socket.emit('webrtc_answer', { answer, to: from });
+        console.log('Sending WebRTC answer to', fromSocketId);
+        socket.emit('webrtc_answer', { answer, toSocketId: fromSocketId });
       } catch (e) {
         console.error('Error handling offer:', e);
       }
@@ -188,7 +186,7 @@ export function useWebRTC(
     };
   }, [socket]);
 
-  const initiateCall = useCallback(async (to: number) => {
+  const initiateCall = useCallback(async (toSocketId: string) => {
     const currentSocket = socketRef.current;
     if (!currentSocket) {
       console.error('Socket is not initialized');
@@ -199,7 +197,7 @@ export function useWebRTC(
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
     
-    console.log('Initiating call to', to);
+    console.log('Initiating call to', toSocketId);
     
     // Configure ICE servers
     let iceServers: RTCIceServer[] = [];
@@ -242,8 +240,8 @@ export function useWebRTC(
 
     peerConnection.current.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log('Sending ICE candidate to', to);
-        currentSocket.emit('webrtc_ice_candidate', { candidate: event.candidate, to });
+        console.log('Sending ICE candidate to', toSocketId);
+        currentSocket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId });
       }
     };
 
@@ -286,7 +284,7 @@ export function useWebRTC(
         offerToReceiveVideo: true
       });
       await peerConnection.current.setLocalDescription(offer);
-      currentSocket.emit('webrtc_offer', { offer, to });
+      currentSocket.emit('webrtc_offer', { offer, toSocketId });
     } catch (e) {
       console.error('Error creating offer:', e);
     }

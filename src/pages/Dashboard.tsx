@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [activeCallUserId, setActiveCallUserId] = useState<number | null>(null);
+  const [activeCallSocketId, setActiveCallSocketId] = useState<string | null>(null);
   const [callEmojis, setCallEmojis] = useState<string[]>([]);
   
   // Media controls
@@ -32,14 +33,22 @@ export default function Dashboard() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const constraintsRef = useRef<HTMLDivElement>(null);
+  const activeStreamRef = useRef<MediaStream | null>(null);
+
+  const setAndStoreLocalStream = (stream: MediaStream | null) => {
+    setLocalStream(stream);
+    activeStreamRef.current = stream;
+  };
 
   const handleCallEnded = () => {
     setCallActive(false);
     setIncomingCall(null);
     setActiveCallUserId(null);
+    setActiveCallSocketId(null);
     setCallEmojis([]);
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
+    if (activeStreamRef.current) {
+      activeStreamRef.current.getTracks().forEach(track => track.stop());
+      activeStreamRef.current = null;
     }
     setLocalStream(null);
     setRemoteStream(null);
@@ -48,7 +57,7 @@ export default function Dashboard() {
     setFacingMode('user');
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, localStream, setRemoteStream, handleCallEnded);
+  const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -180,16 +189,21 @@ export default function Dashboard() {
       setIncomingCall(data);
     });
 
-    newSocket.on('call_accepted', ({ from }) => {
+    newSocket.on('call_answered_elsewhere', () => {
+      setIncomingCall(null);
+    });
+
+    newSocket.on('call_accepted', ({ from, fromSocketId }) => {
       console.log('Call accepted by', from);
       setCallActive(true);
       setActiveCallUserId(from);
-      initiateCall(from);
+      setActiveCallSocketId(fromSocketId);
+      initiateCall(fromSocketId);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
       setCallEmojis(emojis);
-      newSocket.emit('set_call_emojis', { to: from, emojis });
+      newSocket.emit('set_call_emojis', { toSocketId: fromSocketId, emojis });
     });
 
     newSocket.on('call_emojis', ({ emojis }) => {
@@ -246,7 +260,7 @@ export default function Dashboard() {
     if (!socket) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
-      setLocalStream(stream);
+      setAndStoreLocalStream(stream);
       setCallActive(true);
       setActiveCallUserId(friendId);
       
@@ -265,12 +279,13 @@ export default function Dashboard() {
     if (!socket) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
-      setLocalStream(stream);
+      setAndStoreLocalStream(stream);
       setCallActive(true);
       setActiveCallUserId(incomingCall.from);
+      setActiveCallSocketId(incomingCall.fromSocketId);
       
       socket.emit('answer_call', {
-        to: incomingCall.from
+        toSocketId: incomingCall.fromSocketId
       });
       setIncomingCall(null);
     } catch (err) {
@@ -281,10 +296,12 @@ export default function Dashboard() {
 
   const endCall = () => {
     if (!socket) return;
-    if (activeCallUserId) {
-      socket.emit('end_call', { to: activeCallUserId });
+    if (activeCallSocketId) {
+      socket.emit('end_call', { toSocketId: activeCallSocketId });
     } else if (incomingCall) {
-      socket.emit('end_call', { to: incomingCall.from });
+      socket.emit('end_call', { toSocketId: incomingCall.fromSocketId });
+    } else if (activeCallUserId) {
+      socket.emit('end_call', { to: activeCallUserId }); // fallback
     }
     handleCallEnded();
     cleanup();
@@ -318,7 +335,7 @@ export default function Dashboard() {
       });
       
       // Update local stream state
-      setLocalStream(newStream);
+      setAndStoreLocalStream(newStream);
       setFacingMode(newFacingMode);
       
       // Replace track in peer connection if active

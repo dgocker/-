@@ -54,68 +54,60 @@ export function setupSocket(io: Server) {
       const targetSockets = onlineUsers.get(userToCall);
       if (targetSockets) {
         targetSockets.forEach(socketId => {
-          io.to(socketId).emit('call_incoming', { from, name });
+          io.to(socketId).emit('call_incoming', { from, name, fromSocketId: socket.id });
         });
       }
     });
 
     socket.on('answer_call', (data) => {
-      const { to } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('call_accepted', { from: userId });
+      const { toSocketId } = data;
+      io.to(toSocketId).emit('call_accepted', { from: userId, fromSocketId: socket.id });
+      
+      // Notify other tabs of the same user to dismiss the incoming call
+      const myOtherSockets = onlineUsers.get(userId);
+      if (myOtherSockets) {
+        myOtherSockets.forEach(id => {
+          if (id !== socket.id) {
+            io.to(id).emit('call_answered_elsewhere');
+          }
         });
       }
     });
 
     socket.on('webrtc_offer', (data) => {
-      const { to, offer } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('webrtc_offer', { offer, from: userId });
-        });
-      }
+      const { toSocketId, offer } = data;
+      io.to(toSocketId).emit('webrtc_offer', { offer, from: userId, fromSocketId: socket.id });
     });
 
     socket.on('webrtc_answer', (data) => {
-      const { to, answer } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('webrtc_answer', { answer, from: userId });
-        });
-      }
+      const { toSocketId, answer } = data;
+      io.to(toSocketId).emit('webrtc_answer', { answer, from: userId, fromSocketId: socket.id });
     });
 
     socket.on('webrtc_ice_candidate', (data) => {
-      const { to, candidate } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('webrtc_ice_candidate', { candidate, from: userId });
-        });
-      }
+      const { toSocketId, candidate } = data;
+      io.to(toSocketId).emit('webrtc_ice_candidate', { candidate, from: userId, fromSocketId: socket.id });
     });
 
     socket.on('end_call', (data) => {
-      const { to } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('call_ended');
-        });
+      const { toSocketId, to } = data;
+      if (toSocketId) {
+        io.to(toSocketId).emit('call_ended');
+      } else if (to) {
+        // Fallback if socketId is not known
+        const targetSockets = onlineUsers.get(to);
+        if (targetSockets) {
+          targetSockets.forEach(socketId => {
+            io.to(socketId).emit('call_ended');
+          });
+        }
       }
     });
 
     socket.on('set_call_emojis', (data) => {
-      const { to, emojis } = data;
-      const targetSockets = onlineUsers.get(to);
-      if (targetSockets) {
-        targetSockets.forEach(socketId => {
-          io.to(socketId).emit('call_emojis', { emojis });
-        });
+      const { toSocketId, emojis } = data;
+      if (toSocketId) {
+        io.to(toSocketId).emit('call_emojis', { emojis });
       }
     });
 
