@@ -51,6 +51,17 @@ export default function Dashboard() {
     activeStreamRef.current = stream;
   };
 
+  const stopLocalStream = () => {
+    if (activeStreamRef.current) {
+      activeStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        track.enabled = false;
+      });
+      activeStreamRef.current = null;
+    }
+    setLocalStream(null);
+  };
+
   const handleCallEnded = () => {
     // Explicitly clear video elements
     if (remoteVideoRef.current) {
@@ -63,17 +74,14 @@ export default function Dashboard() {
       localVideoRef.current.pause();
     }
 
+    stopLocalStream();
+
     setCallActive(false);
     setIncomingCall(null);
     setActiveCallUserId(null);
     setActiveCallSocketId(null);
     setCallEmojis([]);
     
-    if (activeStreamRef.current) {
-      activeStreamRef.current.getTracks().forEach(track => track.stop());
-      activeStreamRef.current = null;
-    }
-    setLocalStream(null);
     setRemoteStream(null);
     setIsAudioMuted(false);
     setIsVideoMuted(false);
@@ -360,8 +368,9 @@ export default function Dashboard() {
   const startCall = async (friendId: number) => {
     if (!socket) return;
     
-    // Cleanup any previous WebRTC state before starting a new call
+    // Cleanup any previous WebRTC state and media streams before starting a new call
     cleanup();
+    stopLocalStream();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
@@ -384,8 +393,9 @@ export default function Dashboard() {
   const answerCall = async () => {
     if (!socket) return;
     
-    // Cleanup any previous WebRTC state before answering
+    // Cleanup any previous WebRTC state and media streams before answering
     cleanup();
+    stopLocalStream();
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
