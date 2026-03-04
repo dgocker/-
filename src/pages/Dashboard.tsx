@@ -45,6 +45,7 @@ export default function Dashboard() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const constraintsRef = useRef<HTMLDivElement>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
+  const isCleaningRef = useRef(false);
 
   const setAndStoreLocalStream = (stream: MediaStream | null) => {
     setLocalStream(stream);
@@ -63,11 +64,13 @@ export default function Dashboard() {
   };
 
   const handleCallEnded = () => {
+    if (isCleaningRef.current) return;
+    isCleaningRef.current = true;
+
     // Explicitly clear video elements
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
       remoteVideoRef.current.pause();
-      remoteVideoRef.current.load(); // Force reset internal buffer
     }
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
@@ -90,60 +93,61 @@ export default function Dashboard() {
     setTimeout(() => {
       setRemoteStream(null);
       setLocalStream(null);
-    }, 100);
+    }, 200);
+
+    setTimeout(() => {
+      isCleaningRef.current = false;
+    }, 300);
   };
 
   const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
 
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
   const [autoplayFailed, setAutoplayFailed] = useState(false);
 
-  // Callback ref for remote video to handle race conditions
-  const setRemoteVideoRef = useCallback((node: HTMLVideoElement | null) => {
-    remoteVideoRef.current = node;
+  useEffect(() => {
+    const video = localVideoRef.current;
+    if (!video || !localStream) return;
 
-    if (node && remoteStream) {
-      node.srcObject = remoteStream;
-      const playPromise = node.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => {
-          console.error("Remote video play failed:", e);
-          setAutoplayFailed(true);
-        });
+    video.srcObject = localStream;
+
+    const playVideo = async () => {
+      try {
+        await video.play();
+      } catch (e: any) {
+        if (e.name === 'AbortError') {
+          console.log('⚠️ Local play aborted (normal race in WebRTC)');
+          return;
+        }
+        console.error("Local video play failed:", e);
       }
-    }
-  }, [remoteStream]);
+    };
+
+    playVideo();
+  }, [localStream]);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
-      const playPromise = remoteVideoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => {
-          console.error("Remote video play failed (Autoplay policy):", e);
-          setAutoplayFailed(true);
-        });
-      }
-      
-      const handleLoaded = () => {
-        remoteVideoRef.current?.play().catch(e => {
-           console.error("Remote video play failed (loadedmetadata):", e);
-           setAutoplayFailed(true);
-        });
-      };
-      
-      remoteVideoRef.current.addEventListener('loadedmetadata', handleLoaded);
-      return () => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.removeEventListener('loadedmetadata', handleLoaded);
+    const video = remoteVideoRef.current;
+    if (!video || !remoteStream) return;
+
+    video.srcObject = remoteStream;
+
+    const playVideo = async () => {
+      try {
+        await video.play();
+        setAutoplayFailed(false);
+        console.log('✅ Remote video played successfully');
+      } catch (e: any) {
+        // Игнорируем race conditions — это нормально в WebRTC
+        if (e.name === 'AbortError') {
+          console.log('⚠️ Play aborted (normal race in WebRTC)');
+          return;
         }
-      };
-    }
+        console.error("Remote video play failed:", e);
+        setAutoplayFailed(true);
+      }
+    };
+
+    playVideo();
   }, [remoteStream]);
 
   const handleManualPlay = () => {
@@ -433,6 +437,11 @@ export default function Dashboard() {
     handleCallEnded();
     
     setTimeout(() => {
+      setRemoteStream(null);
+      setLocalStream(null);
+    }, 200);
+
+    setTimeout(() => {
       if (peerConnection.current) peerConnection.current = null;
     }, 150);
   };
@@ -684,9 +693,10 @@ export default function Dashboard() {
             >
               <video 
                 key={remoteStream ? 'remote-stream-active' : 'remote-stream-loading'}
-                ref={setRemoteVideoRef} 
+                ref={remoteVideoRef} 
                 autoPlay 
                 playsInline 
+                disablePictureInPicture
                 className="w-full h-full object-cover"
               />
               {autoplayFailed && (

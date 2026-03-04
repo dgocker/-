@@ -187,6 +187,7 @@ export function useWebRTC(
     };
 
     const handleOffer = async ({ offer, from, fromSocketId }: any) => {
+      await new Promise(r => setTimeout(r, 80)); // micro-pause for Telegram WebView
       console.log('Received WebRTC offer from', from);
       
       // If a peer connection already exists, close it to ensure a clean state for the new offer
@@ -252,6 +253,7 @@ export function useWebRTC(
   }, [socket]);
 
   const initiateCall = useCallback(async (toSocketId: string) => {
+    await new Promise(r => setTimeout(r, 80)); // micro-pause for Telegram WebView
     const currentSocket = socketRef.current;
     if (!currentSocket) {
       console.error('Socket is not initialized');
@@ -263,7 +265,6 @@ export function useWebRTC(
       peerConnection.current.close();
       peerConnection.current = null;
     }
-    await new Promise(r => setTimeout(r, 50)); // micro-pause
     
     // Reset state for new connection
     iceCandidatesQueue.current = [];
