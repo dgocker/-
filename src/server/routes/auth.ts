@@ -65,6 +65,28 @@ router.post('/telegram-webapp', async (req, res) => {
   }
 });
 
+async function sendWelcomeMessage(telegramId: number) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: telegramId,
+        text: '👋 Добро пожаловать! Теперь я в вашем списке чатов, чтобы вы могли быстро открывать приложение для звонков.'
+      }),
+    });
+    const data = await response.json();
+    if (!data.ok) {
+      console.error('Failed to send welcome message:', data.description);
+    }
+  } catch (error) {
+    console.error('Error sending welcome message:', error);
+  }
+}
+
 async function handleUserLogin(authData: any, inviteCode: string, res: any) {
   const { id: telegram_id, first_name, last_name, username, photo_url } = authData;
 
@@ -88,6 +110,9 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
       `);
       const info = await stmt.run(telegram_id, first_name, last_name, username, photo_url);
       user = await db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
+      
+      // Send welcome message so bot appears in chat list
+      sendWelcomeMessage(telegram_id);
     } else {
       // Need an invite code
       if (!inviteCode) {
@@ -110,6 +135,9 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
       // Mark invite as used
       await db.prepare('UPDATE app_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?')
         .run(user.id, invite.id);
+        
+      // Send welcome message so bot appears in chat list
+      sendWelcomeMessage(telegram_id);
     }
   } else {
     // Update role if it changed (e.g., admin was set in env later)
