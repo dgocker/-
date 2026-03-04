@@ -72,8 +72,16 @@ export default function Dashboard() {
     fetch('/api/friends', {
       headers: { Authorization: `Bearer ${token}` }
     })
-    .then(res => res.json())
-    .then(data => setFriends(data.friends));
+    .then(res => {
+      if (res.status === 401 || res.status === 403) {
+        logout();
+        navigate('/login');
+        throw new Error('Unauthorized');
+      }
+      return res.json();
+    })
+    .then(data => setFriends(data.friends))
+    .catch(err => console.error('Failed to fetch friends', err));
 
     // Socket setup
     const newSocket = io({

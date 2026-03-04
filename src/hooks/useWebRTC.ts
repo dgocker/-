@@ -51,7 +51,11 @@ export function useWebRTC(
 
       if (localStreamRef.current) {
         console.log('Adding local tracks to peer connection');
-        localStreamRef.current.getTracks().forEach(track => {
+        const tracks = localStreamRef.current.getTracks();
+        // Sort tracks to ensure consistent m-line order (audio first, then video)
+        tracks.sort((a, b) => a.kind.localeCompare(b.kind));
+        
+        tracks.forEach(track => {
           pc.addTrack(track, localStreamRef.current!);
         });
       } else {
@@ -145,7 +149,11 @@ export function useWebRTC(
 
     if (localStreamRef.current) {
       console.log('Adding local tracks to peer connection (initiate)');
-      localStreamRef.current.getTracks().forEach(track => {
+      const tracks = localStreamRef.current.getTracks();
+      // Sort tracks to ensure consistent m-line order (audio first, then video)
+      tracks.sort((a, b) => a.kind.localeCompare(b.kind));
+      
+      tracks.forEach(track => {
         peerConnection.current?.addTrack(track, localStreamRef.current!);
       });
     } else {
