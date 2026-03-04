@@ -98,18 +98,19 @@ export function useWebRTC(
       // Always add public STUN servers as fallback (at the end)
       iceServers.push(
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' }
       );
+
+      if (peerConnection.current) {
+        peerConnection.current.close();
+      }
 
       const pc = new RTCPeerConnection({
         iceServers: iceServers
       });
 
       pc.onicecandidate = (event) => {
+        if (pc !== peerConnection.current) return;
         if (event.candidate) {
           console.log('Sending ICE candidate');
           socket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId: targetSocketId });
@@ -117,11 +118,13 @@ export function useWebRTC(
       };
 
       pc.ontrack = (event) => {
+        if (pc !== peerConnection.current) return;
         console.log('Received remote track');
         setRemoteStreamRef.current(event.streams[0]);
       };
 
       pc.onconnectionstatechange = () => {
+        if (pc !== peerConnection.current) return;
         console.log('Connection state changed:', pc.connectionState);
         setConnectionState(pc.connectionState);
         // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
@@ -131,6 +134,7 @@ export function useWebRTC(
       };
 
       pc.oniceconnectionstatechange = () => {
+        if (pc !== peerConnection.current) return;
         console.log('ICE Connection state changed:', pc.iceConnectionState);
         setConnectionState(pc.iceConnectionState); // Use ICE state for more granular feedback
         
@@ -278,55 +282,60 @@ export function useWebRTC(
     // Always add public STUN servers as fallback (at the end)
     iceServers.push(
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
       { urls: 'stun:global.stun.twilio.com:3478' }
     );
 
-    peerConnection.current = new RTCPeerConnection({
+    if (peerConnection.current) {
+      peerConnection.current.close();
+    }
+
+    const pc = new RTCPeerConnection({
       iceServers: iceServers
     });
+    peerConnection.current = pc;
 
-    peerConnection.current.onicecandidate = (event) => {
+    pc.onicecandidate = (event) => {
+      if (pc !== peerConnection.current) return;
       if (event.candidate) {
         console.log('Sending ICE candidate to', toSocketId);
         currentSocket.emit('webrtc_ice_candidate', { candidate: event.candidate, toSocketId });
       }
     };
 
-    peerConnection.current.ontrack = (event) => {
+    pc.ontrack = (event) => {
+      if (pc !== peerConnection.current) return;
       console.log('Received remote track');
       setRemoteStreamRef.current(event.streams[0]);
     };
 
-    peerConnection.current.onconnectionstatechange = () => {
-      console.log('Connection state changed:', peerConnection.current?.connectionState);
-      setConnectionState(peerConnection.current?.connectionState || 'closed');
+    pc.onconnectionstatechange = () => {
+      if (pc !== peerConnection.current) return;
+      console.log('Connection state changed:', pc.connectionState);
+      setConnectionState(pc.connectionState);
       // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
-      if (peerConnection.current?.connectionState === 'closed') {
+      if (pc.connectionState === 'closed') {
         onCallEndedRef.current();
       }
     };
 
-    peerConnection.current.oniceconnectionstatechange = () => {
-      console.log('ICE Connection state changed:', peerConnection.current?.iceConnectionState);
-      setConnectionState(peerConnection.current?.iceConnectionState || 'closed');
+    pc.oniceconnectionstatechange = () => {
+      if (pc !== peerConnection.current) return;
+      console.log('ICE Connection state changed:', pc.iceConnectionState);
+      setConnectionState(pc.iceConnectionState);
       
-      if (peerConnection.current?.iceConnectionState === 'connected' || peerConnection.current?.iceConnectionState === 'completed') {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         restartAttemptsRef.current = 0;
         if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       }
       
       // Automatic ICE Restart on connection drop
-      if ((peerConnection.current?.iceConnectionState === 'disconnected' || peerConnection.current?.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
+      if ((pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') && isCallerRef.current && activeSocketIdRef.current) {
         console.log('Connection lost. Waiting to see if it recovers...');
         
         if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
         
         restartTimeoutRef.current = setTimeout(() => {
-          if (peerConnection.current && (peerConnection.current.iceConnectionState === 'disconnected' || peerConnection.current.iceConnectionState === 'failed')) {
+          if (pc === peerConnection.current && (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed')) {
             if (restartAttemptsRef.current >= 3) {
               console.warn('Max ICE restart attempts reached. Giving up.');
               return;
@@ -334,8 +343,8 @@ export function useWebRTC(
             try {
               restartAttemptsRef.current += 1;
               console.log(`Initiating automatic ICE Restart (Attempt ${restartAttemptsRef.current})...`);
-              peerConnection.current.createOffer({ iceRestart: true }).then(offer => {
-                peerConnection.current?.setLocalDescription(offer);
+              pc.createOffer({ iceRestart: true }).then(offer => {
+                pc.setLocalDescription(offer);
                 currentSocket.emit('webrtc_offer', { offer, toSocketId: activeSocketIdRef.current });
               });
             } catch (e) {
@@ -353,19 +362,18 @@ export function useWebRTC(
       tracks.sort((a, b) => a.kind.localeCompare(b.kind));
       
       tracks.forEach(track => {
-        peerConnection.current?.addTrack(track, localStreamRef.current!);
+        pc.addTrack(track, localStreamRef.current!);
       });
     } else {
       console.warn('No local stream available when initiating call');
     }
 
     try {
-      const offer = await peerConnection.current.createOffer({ 
-        iceRestart: true,
+      const offer = await pc.createOffer({ 
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
       });
-      await peerConnection.current.setLocalDescription(offer);
+      await pc.setLocalDescription(offer);
       currentSocket.emit('webrtc_offer', { offer, toSocketId });
     } catch (e) {
       console.error('Error creating offer:', e);
