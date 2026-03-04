@@ -89,6 +89,52 @@ export default function Dashboard() {
     });
     setSocket(newSocket);
 
+    // Check for friend invite codes (from Telegram WebApp or LocalStorage)
+    const checkFriendInvite = async () => {
+      const tg = (window as any).Telegram?.WebApp;
+      let code = localStorage.getItem('pending_friend_code');
+      
+      if (tg && tg.initDataUnsafe?.start_param && tg.initDataUnsafe.start_param.startsWith('friend-')) {
+        code = tg.initDataUnsafe.start_param.replace('friend-', '');
+      }
+
+      if (code) {
+        try {
+          const res = await fetch('/api/friends/add', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({ code })
+          });
+          
+          const data = await res.json();
+          
+          if (res.ok) {
+            alert('Друг успешно добавлен!');
+            // Refresh friends list
+            fetch('/api/friends', {
+               headers: { Authorization: `Bearer ${token}` }
+            })
+            .then(res => res.json())
+            .then(data => setFriends(data.friends));
+            
+            // Notify via socket
+            newSocket.emit('refresh_friends');
+          } else if (data.error !== 'Already friends') {
+             console.error('Error adding friend:', data.error);
+          }
+        } catch (e) {
+          console.error('Failed to add friend', e);
+        } finally {
+          localStorage.removeItem('pending_friend_code');
+        }
+      }
+    };
+    
+    checkFriendInvite();
+
     newSocket.on('online_friends', (friends: number[]) => {
       setOnlineFriends(friends);
     });

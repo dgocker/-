@@ -11,6 +11,8 @@ export function useWebRTC(
   const localStreamRef = useRef(localStream);
   const setRemoteStreamRef = useRef(setRemoteStream);
   const onCallEndedRef = useRef(onCallEnded);
+  const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
+  const isRemoteDescriptionSet = useRef(false);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -22,7 +24,27 @@ export function useWebRTC(
   useEffect(() => {
     if (!socket) return;
 
+    const processIceQueue = async () => {
+      if (!peerConnection.current || !isRemoteDescriptionSet.current) return;
+      
+      while (iceCandidatesQueue.current.length > 0) {
+        const candidate = iceCandidatesQueue.current.shift();
+        if (candidate) {
+          try {
+            console.log('Processing queued ICE candidate');
+            await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error('Error adding queued ice candidate', e);
+          }
+        }
+      }
+    };
+
     const createPeerConnection = (targetUserId?: number) => {
+      // Reset state for new connection
+      iceCandidatesQueue.current = [];
+      isRemoteDescriptionSet.current = false;
+
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -72,6 +94,9 @@ export function useWebRTC(
       }
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        isRemoteDescriptionSet.current = true;
+        await processIceQueue();
+        
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
         console.log('Sending WebRTC answer to', from);
@@ -86,6 +111,8 @@ export function useWebRTC(
       if (peerConnection.current) {
         try {
           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+          isRemoteDescriptionSet.current = true;
+          await processIceQueue();
         } catch (e) {
           console.error('Error handling answer:', e);
         }
@@ -95,10 +122,15 @@ export function useWebRTC(
     const handleIceCandidate = async ({ candidate }: any) => {
       console.log('Received ICE candidate');
       if (peerConnection.current) {
-        try {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.error('Error adding received ice candidate', e);
+        if (isRemoteDescriptionSet.current) {
+           try {
+             await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+           } catch (e) {
+             console.error('Error adding received ice candidate', e);
+           }
+        } else {
+           console.log('Queueing ICE candidate (remote description not set)');
+           iceCandidatesQueue.current.push(candidate);
         }
       }
     };
@@ -120,6 +152,11 @@ export function useWebRTC(
       console.error('Socket is not initialized');
       return;
     }
+    
+    // Reset state for new connection
+    iceCandidatesQueue.current = [];
+    isRemoteDescriptionSet.current = false;
+    
     console.log('Initiating call to', to);
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
@@ -174,6 +211,8 @@ export function useWebRTC(
       peerConnection.current.close();
       peerConnection.current = null;
     }
+    iceCandidatesQueue.current = [];
+    isRemoteDescriptionSet.current = false;
   }, []);
 
   return { initiateCall, cleanup, peerConnection };
