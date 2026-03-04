@@ -642,7 +642,7 @@ export default function Dashboard() {
                     {connectionState === 'completed' && 'Соединение установлено'}
                     {connectionState === 'failed' && 'Ошибка соединения (NAT)'}
                     {connectionState === 'disconnected' && 'Отключено'}
-                    {connectionState === 'closed' && 'Завершено'}
+                    {connectionState === 'closed' && 'Подключение...'}
                     {!['new', 'checking', 'connected', 'completed', 'failed', 'disconnected', 'closed'].includes(connectionState) && connectionState}
                   </p>
                   {connectionState === 'checking' && <div className="w-4 h-4 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />}

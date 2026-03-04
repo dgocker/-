@@ -178,10 +178,17 @@ export function useWebRTC(
 
     const handleOffer = async ({ offer, from, fromSocketId }: any) => {
       console.log('Received WebRTC offer from', from);
-      if (!peerConnection.current) {
-        isCallerRef.current = false;
-        peerConnection.current = createPeerConnection(fromSocketId);
+      
+      // If a peer connection already exists, close it to ensure a clean state for the new offer
+      if (peerConnection.current) {
+        console.warn('Received offer while PeerConnection exists. Closing existing connection.');
+        peerConnection.current.close();
+        peerConnection.current = null;
       }
+
+      isCallerRef.current = false;
+      peerConnection.current = createPeerConnection(fromSocketId);
+
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
         isRemoteDescriptionSet.current = true;
@@ -387,6 +394,8 @@ export function useWebRTC(
     }
     iceCandidatesQueue.current = [];
     isRemoteDescriptionSet.current = false;
+    activeSocketIdRef.current = null;
+    isCallerRef.current = false;
     setConnectionState('closed');
   }, []);
 
