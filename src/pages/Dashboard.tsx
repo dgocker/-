@@ -220,7 +220,13 @@ export default function Dashboard() {
       setCallActive(true);
       setActiveCallUserId(from);
       setActiveCallSocketId(fromSocketId);
-      initiateCall(fromSocketId);
+      
+      // Add a small delay before initiating the call to ensure the other side is fully ready
+      // and to prevent race conditions with ICE candidates
+      setTimeout(() => {
+        console.log('Initiating call after delay...');
+        initiateCall(fromSocketId);
+      }, 500);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
@@ -311,6 +317,10 @@ export default function Dashboard() {
 
   const startCall = async (friendId: number) => {
     if (!socket) return;
+    
+    // Cleanup any previous WebRTC state before starting a new call
+    cleanup();
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
       setAndStoreLocalStream(stream);
@@ -330,6 +340,10 @@ export default function Dashboard() {
 
   const answerCall = async () => {
     if (!socket) return;
+    
+    // Cleanup any previous WebRTC state before answering
+    cleanup();
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
       setAndStoreLocalStream(stream);
