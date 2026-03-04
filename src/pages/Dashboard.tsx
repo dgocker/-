@@ -41,8 +41,8 @@ export default function Dashboard() {
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const [localVideoElement, setLocalVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [remoteVideoElement, setRemoteVideoElement] = useState<HTMLVideoElement | null>(null);
   const constraintsRef = useRef<HTMLDivElement>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
 
@@ -71,30 +71,30 @@ export default function Dashboard() {
   const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    if (localVideoElement && localStream) {
+      localVideoElement.srcObject = localStream;
     }
-  }, [localStream]);
+  }, [localStream, localVideoElement]);
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (remoteVideoElement && remoteStream) {
+      remoteVideoElement.srcObject = remoteStream;
       // Explicitly attempt to play the video to overcome browser autoplay policies
-      const playPromise = remoteVideoRef.current.play();
+      const playPromise = remoteVideoElement.play();
       if (playPromise !== undefined) {
-        playPromise.catch(e => {
+        playPromise.then(() => setAutoplayFailed(false)).catch(e => {
           console.error("Remote video play failed (Autoplay policy):", e);
           setAutoplayFailed(true);
         });
       }
     }
-  }, [remoteStream, callActive]);
+  }, [remoteStream, remoteVideoElement]);
 
   const handleManualPlay = () => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.play()
+    if (remoteVideoElement) {
+      remoteVideoElement.play()
         .then(() => setAutoplayFailed(false))
         .catch(console.error);
     }
@@ -221,9 +221,12 @@ export default function Dashboard() {
       setActiveCallUserId(from);
       setActiveCallSocketId(fromSocketId);
       
-      // Initiate call immediately to prevent race conditions
-      console.log('Initiating call immediately...');
-      initiateCall(fromSocketId);
+      // Add a small delay before initiating the call to ensure the other side is fully ready
+      // and to prevent race conditions with ICE candidates
+      setTimeout(() => {
+        console.log('Initiating call after delay...');
+        initiateCall(fromSocketId);
+      }, 500);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
@@ -617,7 +620,7 @@ export default function Dashboard() {
               onClick={handleManualPlay}
             >
               <video 
-                ref={remoteVideoRef} 
+                ref={setRemoteVideoElement} 
                 autoPlay 
                 playsInline 
                 className="w-full h-full object-cover"
@@ -636,10 +639,10 @@ export default function Dashboard() {
                     {connectionState === 'new' && 'Инициализация...'}
                     {connectionState === 'checking' && 'Поиск пути (NAT)...'}
                     {connectionState === 'connected' && 'Подключено!'}
-                    {connectionState === 'completed' && 'Подключено!'}
+                    {connectionState === 'completed' && 'Соединение установлено'}
                     {connectionState === 'failed' && 'Ошибка соединения (NAT)'}
-                    {connectionState === 'disconnected' && 'Связь прервана, переподключение...'}
-                    {connectionState === 'closed' && 'Соединение завершено'}
+                    {connectionState === 'disconnected' && 'Отключено'}
+                    {connectionState === 'closed' && 'Подключение...'}
                     {!['new', 'checking', 'connected', 'completed', 'failed', 'disconnected', 'closed'].includes(connectionState) && connectionState}
                   </p>
                   {connectionState === 'checking' && <div className="w-4 h-4 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />}
@@ -658,7 +661,7 @@ export default function Dashboard() {
               style={{ bottom: 32, right: 32 }}
             >
                <video 
-                ref={localVideoRef} 
+                ref={setLocalVideoElement} 
                 autoPlay 
                 playsInline 
                 muted 
