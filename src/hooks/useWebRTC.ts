@@ -48,20 +48,14 @@ export function useWebRTC(
       isRemoteDescriptionSet.current = false;
       setConnectionState('new');
 
-      const iceServers: RTCIceServer[] = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ];
+      // Configure ICE servers
+      let iceServers: RTCIceServer[] = [];
 
       // Add custom STUN server if configured
       const customStun = import.meta.env.VITE_STUN_URL;
       if (customStun) {
         console.log('Using custom STUN server:', customStun);
-        iceServers.unshift({ urls: customStun });
+        iceServers.push({ urls: customStun });
       }
 
       // Add TURN servers if configured
@@ -78,6 +72,16 @@ export function useWebRTC(
           credential: turnCredential
         });
       }
+
+      // Always add public STUN servers as fallback (at the end)
+      iceServers.push(
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      );
 
       const pc = new RTCPeerConnection({
         iceServers: iceServers
@@ -196,20 +200,15 @@ export function useWebRTC(
     isRemoteDescriptionSet.current = false;
     
     console.log('Initiating call to', to);
-    const iceServers: RTCIceServer[] = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
-    ];
+    
+    // Configure ICE servers
+    let iceServers: RTCIceServer[] = [];
 
     // Add custom STUN server if configured
     const customStun = import.meta.env.VITE_STUN_URL;
     if (customStun) {
       console.log('Using custom STUN server:', customStun);
-      iceServers.unshift({ urls: customStun });
+      iceServers.push({ urls: customStun });
     }
 
     // Add TURN servers if configured
@@ -226,6 +225,16 @@ export function useWebRTC(
         credential: turnCredential
       });
     }
+
+    // Always add public STUN servers as fallback (at the end)
+    iceServers.push(
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    );
 
     peerConnection.current = new RTCPeerConnection({
       iceServers: iceServers
@@ -246,7 +255,8 @@ export function useWebRTC(
     peerConnection.current.onconnectionstatechange = () => {
       console.log('Connection state changed:', peerConnection.current?.connectionState);
       setConnectionState(peerConnection.current?.connectionState || 'closed');
-      if (peerConnection.current?.connectionState === 'disconnected' || peerConnection.current?.connectionState === 'failed' || peerConnection.current?.connectionState === 'closed') {
+      // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
+      if (peerConnection.current?.connectionState === 'closed') {
         onCallEndedRef.current();
       }
     };

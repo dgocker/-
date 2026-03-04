@@ -56,11 +56,29 @@ export default function Dashboard() {
     }
   }, [localStream]);
 
+  const [autoplayFailed, setAutoplayFailed] = useState(false);
+
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      // Explicitly attempt to play the video to overcome browser autoplay policies
+      const playPromise = remoteVideoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => {
+          console.error("Remote video play failed (Autoplay policy):", e);
+          setAutoplayFailed(true);
+        });
+      }
     }
   }, [remoteStream]);
+
+  const handleManualPlay = () => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.play()
+        .then(() => setAutoplayFailed(false))
+        .catch(console.error);
+    }
+  };
 
   useEffect(() => {
     if (!token) {
@@ -513,13 +531,24 @@ export default function Dashboard() {
 
           <div className="flex-1 relative overflow-hidden">
             {/* Remote Video */}
-            <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center">
+            <div 
+              className="absolute inset-0 bg-zinc-900 flex items-center justify-center"
+              onClick={handleManualPlay}
+            >
               <video 
                 ref={remoteVideoRef} 
                 autoPlay 
                 playsInline 
                 className="w-full h-full object-cover"
               />
+              {autoplayFailed && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-30">
+                  <div className="bg-emerald-500 text-white px-6 py-3 rounded-full font-medium flex items-center gap-2 animate-pulse cursor-pointer shadow-xl">
+                    <Video size={20} />
+                    Нажмите, чтобы включить видео
+                  </div>
+                </div>
+              )}
               {!remoteStream && (
                 <div className="absolute flex flex-col items-center gap-2">
                   <p className="text-zinc-500">
