@@ -92,15 +92,22 @@ export function setupSocket(io: Server) {
     socket.on('end_call', (data) => {
       const { toSocketId, to } = data;
       if (toSocketId) {
-        io.to(toSocketId).emit('call_ended');
+        io.to(toSocketId).emit('call_ended', { from: userId, fromSocketId: socket.id });
       } else if (to) {
         // Fallback if socketId is not known
         const targetSockets = onlineUsers.get(to);
         if (targetSockets) {
           targetSockets.forEach(socketId => {
-            io.to(socketId).emit('call_ended');
+            io.to(socketId).emit('call_ended', { from: userId, fromSocketId: socket.id });
           });
         }
+      }
+    });
+
+    socket.on('user_busy', (data) => {
+      const { toSocketId } = data;
+      if (toSocketId) {
+        io.to(toSocketId).emit('user_busy', { from: userId, fromSocketId: socket.id });
       }
     });
 

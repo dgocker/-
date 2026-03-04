@@ -25,6 +25,17 @@ export default function Dashboard() {
   const [activeCallSocketId, setActiveCallSocketId] = useState<string | null>(null);
   const [callEmojis, setCallEmojis] = useState<string[]>([]);
   
+  // Refs for socket event handlers
+  const callActiveRef = useRef(callActive);
+  const incomingCallRef = useRef(incomingCall);
+  const activeCallUserIdRef = useRef(activeCallUserId);
+  const activeCallSocketIdRef = useRef(activeCallSocketId);
+
+  useEffect(() => { callActiveRef.current = callActive; }, [callActive]);
+  useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
+  useEffect(() => { activeCallUserIdRef.current = activeCallUserId; }, [activeCallUserId]);
+  useEffect(() => { activeCallSocketIdRef.current = activeCallSocketId; }, [activeCallSocketId]);
+
   // Media controls
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
@@ -186,7 +197,18 @@ export default function Dashboard() {
     });
 
     newSocket.on('call_incoming', (data) => {
+      if (callActiveRef.current || incomingCallRef.current) {
+        console.log('Auto-rejecting call from', data.from, 'because we are busy');
+        newSocket.emit('user_busy', { toSocketId: data.fromSocketId });
+        return;
+      }
       setIncomingCall(data);
+    });
+
+    newSocket.on('user_busy', () => {
+      alert('Пользователь занят');
+      handleCallEnded();
+      cleanup();
     });
 
     newSocket.on('call_answered_elsewhere', () => {
@@ -210,9 +232,33 @@ export default function Dashboard() {
       setCallEmojis(emojis);
     });
 
-    newSocket.on('call_ended', () => {
-      handleCallEnded();
-      cleanup();
+    newSocket.on('call_ended', (data) => {
+      const { from, fromSocketId } = data || {};
+      console.log('Call ended by remote', from, fromSocketId);
+      
+      // Fallback for older server events without from/fromSocketId
+      if (!from && !fromSocketId) {
+        handleCallEnded();
+        cleanup();
+        return;
+      }
+
+      // Check if the end_call is from our active partner
+      if (
+        (activeCallSocketIdRef.current && activeCallSocketIdRef.current === fromSocketId) ||
+        (activeCallUserIdRef.current && activeCallUserIdRef.current === from)
+      ) {
+        handleCallEnded();
+        cleanup();
+      } 
+      // Check if the end_call is from the person currently ringing us
+      else if (
+        incomingCallRef.current && 
+        (incomingCallRef.current.fromSocketId === fromSocketId || incomingCallRef.current.from === from)
+      ) {
+        setIncomingCall(null);
+      }
+      // Otherwise, ignore it! (It's from someone else we aren't talking to)
     });
 
     return () => {
