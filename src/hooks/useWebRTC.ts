@@ -48,15 +48,39 @@ export function useWebRTC(
       isRemoteDescriptionSet.current = false;
       setConnectionState('new');
 
+      const iceServers: RTCIceServer[] = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      ];
+
+      // Add custom STUN server if configured
+      const customStun = import.meta.env.VITE_STUN_URL;
+      if (customStun) {
+        console.log('Using custom STUN server:', customStun);
+        iceServers.unshift({ urls: customStun });
+      }
+
+      // Add TURN servers if configured
+      const turnUrls = import.meta.env.VITE_TURN_URL;
+      const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+      const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+      if (turnUrls && turnUsername && turnCredential) {
+        const urls = turnUrls.split(',').map((u: string) => u.trim());
+        console.log('Using custom TURN servers:', urls);
+        iceServers.push({
+          urls: urls,
+          username: turnUsername,
+          credential: turnCredential
+        });
+      }
+
       const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-          { urls: 'stun:global.stun.twilio.com:3478' }
-        ]
+        iceServers: iceServers
       });
 
       pc.onicecandidate = (event) => {
@@ -74,7 +98,8 @@ export function useWebRTC(
       pc.onconnectionstatechange = () => {
         console.log('Connection state changed:', pc.connectionState);
         setConnectionState(pc.connectionState);
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        // Only close on 'closed'. Let 'disconnected' and 'failed' persist so user can see error or try to recover.
+        if (pc.connectionState === 'closed') {
           onCallEndedRef.current();
         }
       };
@@ -171,15 +196,39 @@ export function useWebRTC(
     isRemoteDescriptionSet.current = false;
     
     console.log('Initiating call to', to);
+    const iceServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    ];
+
+    // Add custom STUN server if configured
+    const customStun = import.meta.env.VITE_STUN_URL;
+    if (customStun) {
+      console.log('Using custom STUN server:', customStun);
+      iceServers.unshift({ urls: customStun });
+    }
+
+    // Add TURN servers if configured
+    const turnUrls = import.meta.env.VITE_TURN_URL;
+    const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+    if (turnUrls && turnUsername && turnCredential) {
+      const urls = turnUrls.split(',').map((u: string) => u.trim());
+      console.log('Using custom TURN servers:', urls);
+      iceServers.push({
+        urls: urls,
+        username: turnUsername,
+        credential: turnCredential
+      });
+    }
+
     peerConnection.current = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ]
+      iceServers: iceServers
     });
 
     peerConnection.current.onicecandidate = (event) => {
