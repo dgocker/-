@@ -48,6 +48,10 @@ export function useWebRTC(
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       });
@@ -161,6 +165,10 @@ export function useWebRTC(
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' }
       ]
     });
@@ -198,7 +206,7 @@ export function useWebRTC(
     }
 
     try {
-      const offer = await peerConnection.current.createOffer();
+      const offer = await peerConnection.current.createOffer({ iceRestart: true });
       await peerConnection.current.setLocalDescription(offer);
       currentSocket.emit('webrtc_offer', { offer, to });
     } catch (e) {

@@ -85,8 +85,19 @@ export default function Dashboard() {
 
     // Socket setup
     const newSocket = io({
-      auth: { token }
+      auth: { token },
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
+
+    newSocket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err.message);
+      if (err.message === 'Authentication error') {
+        logout();
+        navigate('/login');
+      }
+    });
+
     setSocket(newSocket);
 
     // Check for friend invite codes (from Telegram WebApp or LocalStorage)
