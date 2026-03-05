@@ -446,7 +446,7 @@ export function useWebRTC(
       }
 
       const QUALITY_PRESETS = {
-        auto:    { maxBitrate: null, scale: 1 },
+        auto:    { maxBitrate: 1500000, scale: 1 }, // Cap at 1.5 Mbps to prevent bufferbloat
         high:    { maxBitrate: 2500000, scale: 1 },
         medium:  { maxBitrate: 1000000, scale: 1.5 },
         low:     { maxBitrate: 400000, scale: 2.5 },

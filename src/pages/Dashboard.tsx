@@ -184,8 +184,9 @@ export default function Dashboard() {
     // Socket setup
     const newSocket = io({
       auth: { token },
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: Infinity, // Keep trying to reconnect
+      timeout: 10000,
+      transports: ['websocket'],
     });
 
     newSocket.on('connect_error', (err) => {
