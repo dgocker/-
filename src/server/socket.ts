@@ -52,9 +52,21 @@ export function setupSocket(io: Server) {
     socket.on('call_user', (data) => {
       const { userToCall, from, name } = data;
       const targetSockets = onlineUsers.get(userToCall);
-      if (targetSockets) {
+      if (targetSockets && targetSockets.size > 0) {
         targetSockets.forEach(socketId => {
           io.to(socketId).emit('call_incoming', { from, name, fromSocketId: socket.id });
+        });
+      } else {
+        socket.emit('user_offline');
+      }
+    });
+
+    socket.on('call_delivered', (data) => {
+      const { to } = data;
+      const targetSockets = onlineUsers.get(to);
+      if (targetSockets) {
+        targetSockets.forEach(socketId => {
+          io.to(socketId).emit('call_delivered');
         });
       }
     });

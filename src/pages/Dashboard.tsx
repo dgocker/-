@@ -30,6 +30,8 @@ export default function Dashboard() {
   const incomingCallRef = useRef(incomingCall);
   const activeCallUserIdRef = useRef(activeCallUserId);
   const activeCallSocketIdRef = useRef(activeCallSocketId);
+  const dialingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => { callActiveRef.current = callActive; }, [callActive]);
   useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
@@ -66,6 +68,16 @@ export default function Dashboard() {
   const handleCallEnded = () => {
     if (isCleaningRef.current) return;
     isCleaningRef.current = true;
+
+    if (dialingTimeoutRef.current) {
+      clearTimeout(dialingTimeoutRef.current);
+      dialingTimeoutRef.current = null;
+    }
+
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
 
     // Explicitly clear video elements
     if (remoteVideoRef.current) {
@@ -278,11 +290,26 @@ export default function Dashboard() {
         newSocket.emit('user_busy', { toSocketId: data.fromSocketId });
         return;
       }
+      // Send delivery confirmation immediately
+      newSocket.emit('call_delivered', { to: data.from });
       setIncomingCall(data);
+    });
+
+    newSocket.on('call_delivered', () => {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
     });
 
     newSocket.on('user_busy', () => {
       alert('Пользователь занят');
+      handleCallEnded();
+      cleanup();
+    });
+
+    newSocket.on('user_offline', () => {
+      alert('Пользователь не в сети');
       handleCallEnded();
       cleanup();
     });
@@ -293,6 +320,10 @@ export default function Dashboard() {
 
     newSocket.on('call_accepted', ({ from, fromSocketId }) => {
       console.log('Call accepted by', from);
+      if (dialingTimeoutRef.current) {
+        clearTimeout(dialingTimeoutRef.current);
+        dialingTimeoutRef.current = null;
+      }
       setCallActive(true);
       setActiveCallUserId(from);
       setActiveCallSocketId(fromSocketId);
@@ -417,6 +448,22 @@ export default function Dashboard() {
         from: user?.id,
         name: user?.first_name
       });
+
+      // Set timeout for connection (ACK) - 5 seconds
+      if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = setTimeout(() => {
+        alert('Не удалось установить соединение');
+        handleCallEnded();
+      }, 5000);
+
+      // Set timeout for call answering - 30 seconds
+      if (dialingTimeoutRef.current) clearTimeout(dialingTimeoutRef.current);
+      dialingTimeoutRef.current = setTimeout(() => {
+        if (callActiveRef.current && !activeCallSocketIdRef.current) {
+          alert('Абонент не отвечает');
+          endCall();
+        }
+      }, 30000); // 30 seconds timeout
     } catch (err) {
       console.error('Failed to get media devices', err);
       alert('Не удалось получить доступ к камере или микрофону');
