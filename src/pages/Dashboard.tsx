@@ -25,6 +25,11 @@ export default function Dashboard() {
   const [activeCallSocketId, setActiveCallSocketId] = useState<string | null>(null);
   const [callEmojis, setCallEmojis] = useState<string[]>([]);
   
+  // Debug info state
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const lastClickTimeRef = useRef(0);
+  const clickCountRef = useRef(0);
+
   // Refs for socket event handlers
   const callActiveRef = useRef(callActive);
   const incomingCallRef = useRef(incomingCall);
@@ -118,6 +123,82 @@ export default function Dashboard() {
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
 
+  // Auto-recovery for frozen video
+  useEffect(() => {
+    if (connectionState === 'connected' && remoteVideoRef.current && remoteStream) {
+      console.log('🔄 Connection restored/stable, ensuring remote video is playing');
+      const video = remoteVideoRef.current;
+      if (video.srcObject !== remoteStream) {
+        video.srcObject = remoteStream;
+      }
+      if (video.paused) {
+        video.play().catch(e => console.error('Auto-recovery play failed:', e));
+      }
+    }
+  }, [connectionState, remoteStream]);
+
+  // Video Watchdog: Detects if video is frozen while audio/connection is fine
+  useEffect(() => {
+    if (!remoteStream || !remoteVideoRef.current || connectionState !== 'connected') return;
+
+    let lastTime = 0;
+    let lastFrames = 0;
+    let stuckCount = 0;
+    const video = remoteVideoRef.current;
+
+    const interval = setInterval(() => {
+      // If video is paused intentionally or stream is inactive, do nothing
+      if (video.paused || !remoteStream.active) return;
+
+      const currentTime = video.currentTime;
+      
+      // Get frame count if supported (detects video-only freeze)
+      let currentFrames = 0;
+      if ('getVideoPlaybackQuality' in video) {
+        currentFrames = video.getVideoPlaybackQuality().totalVideoFrames;
+      }
+
+      // Check if we expect video to be moving (track exists, enabled, not muted)
+      const hasActiveVideo = remoteStream.getVideoTracks().some(t => t.enabled && !t.muted && t.readyState === 'live');
+
+      // Condition 1: Time is stuck (Total freeze)
+      const isTimeStuck = currentTime > 0 && currentTime === lastTime;
+      
+      // Condition 2: Frames are stuck (Video freeze, Audio might be playing)
+      // Only check if we actually have active video and have received at least some frames previously
+      const isVideoStuck = hasActiveVideo && currentFrames > 0 && currentFrames === lastFrames;
+
+      if (isTimeStuck || isVideoStuck) {
+        stuckCount++;
+        // If stuck for 4 seconds (4 checks)
+        if (stuckCount > 4) {
+          console.warn(`⚠️ Video Watchdog: Freeze detected (TimeStuck: ${isTimeStuck}, VideoStuck: ${isVideoStuck}), forcing restart...`);
+          
+          // Force restart video element
+          video.pause();
+          video.srcObject = null;
+          
+          setTimeout(() => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = remoteStream;
+              remoteVideoRef.current.play()
+                .then(() => console.log('✅ Video Watchdog: Restarted successfully'))
+                .catch(e => console.error('❌ Video Watchdog: Restart failed', e));
+            }
+          }, 100);
+          
+          stuckCount = 0;
+        }
+      } else {
+        stuckCount = 0;
+        lastTime = currentTime;
+        lastFrames = currentFrames;
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [remoteStream, connectionState]);
+
   useEffect(() => {
     const video = localVideoRef.current;
     if (!video || !localStream) return;
@@ -169,6 +250,21 @@ export default function Dashboard() {
       remoteVideoRef.current.play()
         .then(() => setAutoplayFailed(false))
         .catch(console.error);
+    }
+  };
+
+  const handleLocalVideoClick = () => {
+    const now = Date.now();
+    if (now - lastClickTimeRef.current < 500) {
+      clickCountRef.current += 1;
+    } else {
+      clickCountRef.current = 1;
+    }
+    lastClickTimeRef.current = now;
+
+    if (clickCountRef.current === 3) {
+      setShowDebugInfo(prev => !prev);
+      clickCountRef.current = 0;
     }
   };
 
@@ -759,9 +855,8 @@ export default function Dashboard() {
           {/* Top Bar with Emojis */}
           <div className="absolute top-0 left-0 right-0 p-6 flex justify-center z-20 pointer-events-none">
             {callEmojis.length > 0 && (
-              <div className="bg-zinc-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-zinc-800 flex items-center gap-2 shadow-xl">
-                <span className="text-xs text-zinc-400 uppercase tracking-wider mr-2">Шифрование:</span>
-                <div className="flex gap-1 text-xl">
+              <div className="bg-zinc-900/40 backdrop-blur-md px-3 py-1 rounded-full border border-zinc-800/50 flex items-center gap-2 shadow-lg">
+                <div className="flex gap-1 text-lg">
                   {callEmojis.map((emoji, i) => <span key={i}>{emoji}</span>)}
                 </div>
               </div>
@@ -816,6 +911,7 @@ export default function Dashboard() {
               initial={{ bottom: 32, right: 32 }}
               className="absolute w-32 h-48 md:w-48 md:h-64 bg-zinc-800 rounded-2xl overflow-hidden shadow-2xl border border-zinc-700 flex items-center justify-center cursor-grab active:cursor-grabbing z-10"
               style={{ bottom: 32, right: 32 }}
+              onClick={handleLocalVideoClick}
             >
                <video 
                 key={localStream ? 'local-stream-active' : 'local-stream-loading'}
@@ -826,20 +922,22 @@ export default function Dashboard() {
                 className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
               />
               {/* Stats Overlay */}
-              <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-mono text-emerald-400 pointer-events-none flex flex-col gap-0.5 border border-white/10">
-                <div className="flex justify-between gap-2">
-                  <span className="text-zinc-400">FPS:</span>
-                  <span>{stats.bitrate > 0 ? '30' : '0'}</span>
+              {showDebugInfo && (
+                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-mono text-emerald-400 pointer-events-none flex flex-col gap-0.5 border border-white/10">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-zinc-400">FPS:</span>
+                    <span>{stats.bitrate > 0 ? '30' : '0'}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-zinc-400">RES:</span>
+                    <span>{stats.resolution}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-zinc-400">BIT:</span>
+                    <span>{stats.bitrate} kbps</span>
+                  </div>
                 </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-zinc-400">RES:</span>
-                  <span>{stats.resolution}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-zinc-400">BIT:</span>
-                  <span>{stats.bitrate} kbps</span>
-                </div>
-              </div>
+              )}
             </motion.div>
           </div>
           
