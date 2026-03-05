@@ -196,6 +196,21 @@ export default function Dashboard() {
       }
     });
 
+    // Handle reconnection
+    newSocket.on('connect', () => {
+      console.log('Socket connected/reconnected with ID:', newSocket.id);
+      // Re-fetch friends to ensure online status is up to date
+      fetch('/api/friends', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => setFriends(data.friends))
+      .catch(console.error);
+      
+      // Notify server we are back online (if needed, though auth handshake usually handles it)
+      newSocket.emit('user_online');
+    });
+
     setSocket(newSocket);
 
     // Check for friend invite codes (from Telegram WebApp or LocalStorage)
