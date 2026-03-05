@@ -402,6 +402,8 @@ export function useWebRTC(
     }
   }, []);
 
+  const [stats, setStats] = useState<{ bitrate: number; resolution: string }>({ bitrate: 0, resolution: '0x0' });
+
   const setVideoQuality = useCallback(async (preset: 'auto' | 'high' | 'medium' | 'low' | 'verylow') => {
     if (!peerConnection.current) return;
     
@@ -415,11 +417,11 @@ export function useWebRTC(
     }
 
     const QUALITY_PRESETS = {
-      auto:    { maxBitrate: null },           // browser decides
-      high:    { maxBitrate: 2500000 },        // ~2.5 Mbps -> 1080p / good 720p
-      medium:  { maxBitrate: 1000000 },        // ~1 Mbps  -> stable 720p
-      low:     { maxBitrate: 400000 },         // ~400 kbps -> 360p-480p
-      verylow: { maxBitrate: 150000 }          // for very bad internet
+      auto:    { maxBitrate: null, scale: 1 },
+      high:    { maxBitrate: 2500000, scale: 1 },
+      medium:  { maxBitrate: 1000000, scale: 2 },
+      low:     { maxBitrate: 400000, scale: 4 },
+      verylow: { maxBitrate: 150000, scale: 8 }
     };
 
     const params = videoSender.getParameters();
@@ -432,17 +434,47 @@ export function useWebRTC(
 
     if (target.maxBitrate !== null) {
       params.encodings[0].maxBitrate = target.maxBitrate;
+      params.encodings[0].scaleResolutionDownBy = target.scale;
     } else {
-      delete params.encodings[0].maxBitrate; // auto mode
+      delete params.encodings[0].maxBitrate;
+      delete params.encodings[0].scaleResolutionDownBy;
     }
 
     try {
       await videoSender.setParameters(params);
-      console.log(`Video quality changed to ${preset} (${target.maxBitrate || 'auto'} bps)`);
+      console.log(`Video quality changed to ${preset} (scale: ${target.scale}, bitrate: ${target.maxBitrate || 'auto'})`);
     } catch (err) {
       console.error('setParameters failed:', err);
     }
   }, []);
+
+  // Stats monitoring
+  useEffect(() => {
+    if (!peerConnection.current || connectionState !== 'connected') return;
+
+    let lastBytesSent = 0;
+    const interval = setInterval(async () => {
+      if (!peerConnection.current || peerConnection.current.connectionState === 'closed') return;
+      
+      try {
+        const statsReport = await peerConnection.current.getStats();
+        statsReport.forEach(report => {
+          if (report.type === 'outbound-rtp' && report.kind === 'video') {
+            const bytesSent = report.bytesSent;
+            const bitrate = Math.round(((bytesSent - lastBytesSent) * 8) / 1000); // kbps
+            lastBytesSent = bytesSent;
+            
+            const resolution = `${report.frameWidth || 0}x${report.frameHeight || 0}`;
+            setStats({ bitrate, resolution });
+          }
+        });
+      } catch (e) {
+        // ignore errors during cleanup
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [connectionState]);
 
   const cleanup = useCallback(() => {
     console.log('🔥 FULL CLEANUP started');
@@ -479,5 +511,5 @@ export function useWebRTC(
     setRemoteStreamRef.current(null);
   }, []);
 
-  return { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality };
+  return { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats };
 }

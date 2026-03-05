@@ -100,8 +100,8 @@ export default function Dashboard() {
     }, 300);
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
-  const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
+  const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
@@ -744,6 +744,21 @@ export default function Dashboard() {
                 muted 
                 className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
               />
+              {/* Stats Overlay */}
+              <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-mono text-emerald-400 pointer-events-none flex flex-col gap-0.5 border border-white/10">
+                <div className="flex justify-between gap-2">
+                  <span className="text-zinc-400">FPS:</span>
+                  <span>{stats.bitrate > 0 ? '30' : '0'}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-zinc-400">RES:</span>
+                  <span>{stats.resolution}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-zinc-400">BIT:</span>
+                  <span>{stats.bitrate} kbps</span>
+                </div>
+              </div>
             </motion.div>
           </div>
           
@@ -798,6 +813,12 @@ export default function Dashboard() {
                     className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'low' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
                   >
                     Low Data
+                  </button>
+                  <button 
+                    onClick={() => { setVideoQuality('verylow'); setCurrentQuality('verylow'); setShowQualityMenu(false); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'verylow' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
+                  >
+                    Very Low
                   </button>
                   <button 
                     onClick={() => { setVideoQuality('auto'); setCurrentQuality('auto'); setShowQualityMenu(false); }}
