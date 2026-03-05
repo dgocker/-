@@ -403,49 +403,76 @@ export function useWebRTC(
   }, []);
 
   const [stats, setStats] = useState<{ bitrate: number; resolution: string }>({ bitrate: 0, resolution: '0x0' });
+  const qualityChangeLock = useRef<boolean>(false);
+  const pendingQualityPreset = useRef<'auto' | 'high' | 'medium' | 'low' | 'verylow' | null>(null);
 
   const setVideoQuality = useCallback(async (preset: 'auto' | 'high' | 'medium' | 'low' | 'verylow') => {
     if (!peerConnection.current) return;
     
-    const videoSender = peerConnection.current
-      .getSenders()
-      .find(s => s.track?.kind === 'video');
-
-    if (!videoSender || !videoSender.track) {
-      console.warn('Video sender not found');
+    // If a change is already in progress, queue the latest request and return
+    if (qualityChangeLock.current) {
+      console.log('Quality change in progress, queueing:', preset);
+      pendingQualityPreset.current = preset;
       return;
     }
 
-    const QUALITY_PRESETS = {
-      auto:    { maxBitrate: null, scale: 1 },
-      high:    { maxBitrate: 2500000, scale: 1 },
-      medium:  { maxBitrate: 1000000, scale: 1.5 },
-      low:     { maxBitrate: 400000, scale: 2.5 },
-      verylow: { maxBitrate: 150000, scale: 4 }
+    qualityChangeLock.current = true;
+
+    const applyQuality = async (targetPreset: 'auto' | 'high' | 'medium' | 'low' | 'verylow') => {
+      if (!peerConnection.current) return;
+
+      const videoSender = peerConnection.current
+        .getSenders()
+        .find(s => s.track?.kind === 'video' && s.track.readyState === 'live');
+
+      if (!videoSender || !videoSender.track) {
+        console.warn('Video sender not found or track not live');
+        return;
+      }
+
+      const QUALITY_PRESETS = {
+        auto:    { maxBitrate: null, scale: 1 },
+        high:    { maxBitrate: 2500000, scale: 1 },
+        medium:  { maxBitrate: 1000000, scale: 1.5 },
+        low:     { maxBitrate: 400000, scale: 2.5 },
+        verylow: { maxBitrate: 150000, scale: 4 }
+      };
+
+      const params = videoSender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+
+      const target = QUALITY_PRESETS[targetPreset];
+
+      if (target.maxBitrate !== null) {
+        params.encodings[0].maxBitrate = target.maxBitrate;
+        params.encodings[0].scaleResolutionDownBy = target.scale;
+      } else {
+        params.encodings[0].maxBitrate = undefined;
+        params.encodings[0].scaleResolutionDownBy = 1;
+      }
+
+      try {
+        await videoSender.setParameters(params);
+        console.log(`✅ Video quality changed to ${targetPreset}`);
+      } catch (err) {
+        console.error('❌ setParameters failed:', err);
+      }
     };
 
-    const params = videoSender.getParameters();
-
-    if (!params.encodings || params.encodings.length === 0) {
-      params.encodings = [{}];
-    }
-
-    const target = QUALITY_PRESETS[preset];
-
-    if (target.maxBitrate !== null) {
-      params.encodings[0].maxBitrate = target.maxBitrate;
-      params.encodings[0].scaleResolutionDownBy = target.scale;
-    } else {
-      // For 'auto', we reset to defaults
-      params.encodings[0].maxBitrate = undefined;
-      params.encodings[0].scaleResolutionDownBy = 1;
-    }
-
     try {
-      await videoSender.setParameters(params);
-      console.log(`Video quality changed to ${preset} (scale: ${target.scale}, bitrate: ${target.maxBitrate || 'auto'})`);
-    } catch (err) {
-      console.error('setParameters failed:', err);
+      await applyQuality(preset);
+      
+      // After applying, check if there's a pending request
+      while (pendingQualityPreset.current !== null) {
+        const nextPreset = pendingQualityPreset.current;
+        pendingQualityPreset.current = null;
+        console.log('Applying pending quality change:', nextPreset);
+        await applyQuality(nextPreset);
+      }
+    } finally {
+      qualityChangeLock.current = false;
     }
   }, []);
 
