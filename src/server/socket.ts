@@ -119,14 +119,14 @@ export function setupSocket(io: Server) {
     });
 
     try {
-      await updateSocketFriends(socket, userId);
+      await updateSocketFriends(io, socket, userId);
     } catch (err) {
       console.error('Error fetching friends for socket:', err);
     }
 
     socket.on('refresh_friends', async () => {
       try {
-        await updateSocketFriends(socket, userId);
+        await updateSocketFriends(io, socket, userId);
       } catch (err) {
         console.error('Error refreshing friends:', err);
       }
@@ -134,7 +134,7 @@ export function setupSocket(io: Server) {
   });
 }
 
-async function updateSocketFriends(socket: Socket, userId: number) {
+async function updateSocketFriends(io: Server, socket: Socket, userId: number) {
   // Notify friends that this user is online
   const friends = await db.prepare(`
     SELECT u.id 
@@ -146,8 +146,7 @@ async function updateSocketFriends(socket: Socket, userId: number) {
   socket.data.friends = friends;
 
   // Update online status for friends
-  // We need to use io (socket.server) to emit to specific socket IDs
-  const io = socket.server;
+  // We need to use io to emit to specific socket IDs
   
   friends.forEach((friend: any) => {
     // Check if friend is online

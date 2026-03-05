@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2 } from 'lucide-react';
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh } from 'lucide-react';
 import { useWebRTC } from '../hooks/useWebRTC';
 
 const EMOJIS = ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🪲', '🪳', '🕷', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳', '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛', '🦏', '🐪', '🐫', '🦒', '🦘', '🐃', '🐂', '🐄', '🐎', '🐖', '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮', '🐕‍🦺', '🐈', '🐈‍⬛', '🪶', '🐓', '🦃', '🦤', '🦚', '🦜', '🦢', '🦩', '🕊', '🐇', '🦝', '🦨', '🦡', '🦦', '🦥', '🐁', '🐀', '🐿', '🦔'];
@@ -100,7 +100,9 @@ export default function Dashboard() {
     }, 300);
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
+  const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
 
@@ -767,6 +769,45 @@ export default function Dashboard() {
             >
               <SwitchCamera size={24} />
             </button>
+
+            <div className="relative">
+              <button 
+                onClick={() => setShowQualityMenu(!showQualityMenu)}
+                className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white transition-colors ${showQualityMenu ? 'bg-zinc-700' : 'bg-zinc-800 hover:bg-zinc-700'}`}
+                title="Качество видео"
+              >
+                <SignalHigh size={24} />
+              </button>
+              
+              {showQualityMenu && (
+                <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-800 rounded-xl p-2 shadow-xl flex flex-col gap-1 min-w-[140px]">
+                  <button 
+                    onClick={() => { setVideoQuality('high'); setCurrentQuality('high'); setShowQualityMenu(false); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'high' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
+                  >
+                    HD (High)
+                  </button>
+                  <button 
+                    onClick={() => { setVideoQuality('medium'); setCurrentQuality('medium'); setShowQualityMenu(false); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'medium' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
+                  >
+                    SD (Medium)
+                  </button>
+                  <button 
+                    onClick={() => { setVideoQuality('low'); setCurrentQuality('low'); setShowQualityMenu(false); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'low' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
+                  >
+                    Low Data
+                  </button>
+                  <button 
+                    onClick={() => { setVideoQuality('auto'); setCurrentQuality('auto'); setShowQualityMenu(false); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors ${currentQuality === 'auto' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-zinc-800 text-zinc-300'}`}
+                  >
+                    Auto
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button 
               onClick={endCall}

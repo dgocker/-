@@ -402,6 +402,48 @@ export function useWebRTC(
     }
   }, []);
 
+  const setVideoQuality = useCallback(async (preset: 'auto' | 'high' | 'medium' | 'low' | 'verylow') => {
+    if (!peerConnection.current) return;
+    
+    const videoSender = peerConnection.current
+      .getSenders()
+      .find(s => s.track?.kind === 'video');
+
+    if (!videoSender || !videoSender.track) {
+      console.warn('Video sender not found');
+      return;
+    }
+
+    const QUALITY_PRESETS = {
+      auto:    { maxBitrate: null },           // browser decides
+      high:    { maxBitrate: 2500000 },        // ~2.5 Mbps -> 1080p / good 720p
+      medium:  { maxBitrate: 1000000 },        // ~1 Mbps  -> stable 720p
+      low:     { maxBitrate: 400000 },         // ~400 kbps -> 360p-480p
+      verylow: { maxBitrate: 150000 }          // for very bad internet
+    };
+
+    const params = videoSender.getParameters();
+
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+
+    const target = QUALITY_PRESETS[preset];
+
+    if (target.maxBitrate !== null) {
+      params.encodings[0].maxBitrate = target.maxBitrate;
+    } else {
+      delete params.encodings[0].maxBitrate; // auto mode
+    }
+
+    try {
+      await videoSender.setParameters(params);
+      console.log(`Video quality changed to ${preset} (${target.maxBitrate || 'auto'} bps)`);
+    } catch (err) {
+      console.error('setParameters failed:', err);
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
     console.log('🔥 FULL CLEANUP started');
 
@@ -437,5 +479,5 @@ export function useWebRTC(
     setRemoteStreamRef.current(null);
   }, []);
 
-  return { initiateCall, cleanup, peerConnection, connectionState };
+  return { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality };
 }
