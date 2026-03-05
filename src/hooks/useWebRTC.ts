@@ -419,9 +419,9 @@ export function useWebRTC(
     const QUALITY_PRESETS = {
       auto:    { maxBitrate: null, scale: 1 },
       high:    { maxBitrate: 2500000, scale: 1 },
-      medium:  { maxBitrate: 1000000, scale: 2 },
-      low:     { maxBitrate: 400000, scale: 4 },
-      verylow: { maxBitrate: 150000, scale: 8 }
+      medium:  { maxBitrate: 1000000, scale: 1.5 },
+      low:     { maxBitrate: 400000, scale: 2.5 },
+      verylow: { maxBitrate: 150000, scale: 4 }
     };
 
     const params = videoSender.getParameters();
@@ -436,8 +436,9 @@ export function useWebRTC(
       params.encodings[0].maxBitrate = target.maxBitrate;
       params.encodings[0].scaleResolutionDownBy = target.scale;
     } else {
-      delete params.encodings[0].maxBitrate;
-      delete params.encodings[0].scaleResolutionDownBy;
+      // For 'auto', we reset to defaults
+      params.encodings[0].maxBitrate = undefined;
+      params.encodings[0].scaleResolutionDownBy = 1;
     }
 
     try {

@@ -383,7 +383,14 @@ export default function Dashboard() {
     stopLocalStream();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }, 
+        audio: true 
+      });
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
@@ -408,7 +415,14 @@ export default function Dashboard() {
     stopLocalStream();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }, 
+        audio: true 
+      });
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
@@ -471,7 +485,11 @@ export default function Dashboard() {
     const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newFacingMode },
+        video: { 
+          facingMode: newFacingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: true
       });
       
