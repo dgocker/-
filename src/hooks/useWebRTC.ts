@@ -151,6 +151,21 @@ export function useWebRTC(
           // Reset attempts on successful connection
           restartAttemptsRef.current = 0;
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+
+          // Check if video tracks have arrived
+          setTimeout(async () => {
+            if (!peerConnection.current) return;
+
+            const receivers = peerConnection.current.getReceivers();
+            const hasVideo = receivers.some(r => r.track?.kind === 'video' && r.track.readyState === 'live');
+
+            if (!hasVideo) {
+              console.warn('ICE connected, but no video tracks -> forced ICE restart');
+              if (isCallerRef.current && activeSocketIdRef.current) {
+                restartIce(peerConnection.current, activeSocketIdRef.current);
+              }
+            }
+          }, 4000); // Give 4 seconds for tracks to arrive
         }
         
         // Automatic ICE Restart on connection drop

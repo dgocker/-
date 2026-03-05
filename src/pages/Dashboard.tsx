@@ -286,7 +286,7 @@ export default function Dashboard() {
       setTimeout(() => {
         console.log('Initiating call after delay...');
         initiateCall(fromSocketId);
-      }, 800);
+      }, 1500);
       
       // Generate and send emojis for key verification
       const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
