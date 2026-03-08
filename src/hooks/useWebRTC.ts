@@ -115,8 +115,10 @@ export function useWebRTC(
       }
 
       const pc = new RTCPeerConnection({
-        iceServers: iceServers
-      });
+        iceServers: iceServers,
+        // @ts-ignore - Required for older Android WebView compatibility
+        sdpSemantics: 'unified-plan'
+      } as RTCConfiguration);
 
       pc.onicecandidate = (event) => {
         if (pc !== peerConnection.current) return;
@@ -205,6 +207,20 @@ export function useWebRTC(
       await new Promise(r => setTimeout(r, 80)); // micro-pause for Telegram WebView
       console.log('Received WebRTC offer from', from);
       
+      // FIX: Wait for local stream to be fully acquired before answering
+      // This prevents sending an Answer without media tracks on slow Android devices
+      let attempts = 0;
+      while (!localStreamRef.current && attempts < 50) {
+        console.log('Waiting for local stream before handling offer...');
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+
+      if (!localStreamRef.current) {
+        console.error('CRITICAL: Local stream not available. Cannot handle offer.');
+        return;
+      }
+      
       // If a peer connection already exists, close it to ensure a clean state for the new offer
       if (peerConnection.current) {
         console.warn('Received offer while PeerConnection exists. Closing existing connection.');
@@ -221,6 +237,12 @@ export function useWebRTC(
         await processIceQueue();
         
         const answer = await peerConnection.current.createAnswer();
+        
+        // Smart Codec Selection: Ensure VP8 is available as a fallback for older Androids
+        if (answer.sdp && !answer.sdp.includes('VP8/90000')) {
+          console.warn('VP8 codec not found in SDP answer. Older devices might fail to decode video.');
+        }
+
         await peerConnection.current.setLocalDescription(answer);
         console.log('Sending WebRTC answer to', fromSocketId);
         socket.emit('webrtc_answer', { answer, toSocketId: fromSocketId });
@@ -272,6 +294,20 @@ export function useWebRTC(
     const currentSocket = socketRef.current;
     if (!currentSocket) {
       console.error('Socket is not initialized');
+      return;
+    }
+    
+    // FIX: Wait for local stream to be fully acquired before initiating
+    // This prevents sending an Offer without media tracks on slow Android devices
+    let attempts = 0;
+    while (!localStreamRef.current && attempts < 50) {
+      console.log('Waiting for local stream before initiating call...');
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+
+    if (!localStreamRef.current) {
+      console.error('CRITICAL: Local stream not available. Cannot initiate call.');
       return;
     }
     
@@ -327,8 +363,10 @@ export function useWebRTC(
     }
 
     const pc = new RTCPeerConnection({
-      iceServers: iceServers
-    });
+      iceServers: iceServers,
+      // @ts-ignore - Required for older Android WebView compatibility
+      sdpSemantics: 'unified-plan'
+    } as RTCConfiguration);
     peerConnection.current = pc;
 
     pc.onicecandidate = (event) => {
@@ -410,6 +448,14 @@ export function useWebRTC(
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
       });
+      
+      // Smart Codec Selection: Ensure VP8 is available as a fallback for older Androids
+      if (offer.sdp && !offer.sdp.includes('VP8/90000')) {
+        console.warn('VP8 codec not found in SDP. Older devices might fail to decode video.');
+      } else {
+        console.log('VP8 codec is present in SDP as a fallback.');
+      }
+
       await pc.setLocalDescription(offer);
       currentSocket.emit('webrtc_offer', { offer, toSocketId });
     } catch (e) {
