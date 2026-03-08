@@ -46,7 +46,7 @@ router.post('/add', async (req: AuthRequest, res) => {
     // Add friend
     await db.prepare('INSERT INTO friends (user_id_1, user_id_2) VALUES (?, ?)').run(req.user.id, link.created_by);
     
-    res.json({ success: true });
+    res.json({ success: true, friendId: link.created_by });
   } catch (error) {
     console.error('Error in /friends/add:', error);
     res.status(500).json({ error: 'Internal server error' });

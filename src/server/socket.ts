@@ -143,6 +143,16 @@ export function setupSocket(io: Server) {
         console.error('Error refreshing friends:', err);
       }
     });
+
+    socket.on('friend_added', (data) => {
+      const { friendId } = data;
+      const targetSockets = onlineUsers.get(friendId);
+      if (targetSockets) {
+        targetSockets.forEach(socketId => {
+          io.to(socketId).emit('friend_list_updated');
+        });
+      }
+    });
   });
 }
 

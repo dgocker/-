@@ -354,6 +354,9 @@ export default function Dashboard() {
             .then(data => setFriends(data.friends));
             
             // Notify via socket
+            if (data.friendId) {
+              newSocket.emit('friend_added', { friendId: data.friendId });
+            }
             newSocket.emit('refresh_friends');
           } else if (data.error !== 'Already friends') {
              console.error('Error adding friend:', data.error);
@@ -367,6 +370,16 @@ export default function Dashboard() {
     };
     
     checkFriendInvite();
+
+    newSocket.on('friend_list_updated', () => {
+      fetch('/api/friends', {
+         headers: { Authorization: `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => setFriends(data.friends));
+      
+      newSocket.emit('refresh_friends');
+    });
 
     newSocket.on('online_friends', (friends: number[]) => {
       setOnlineFriends(friends);
@@ -501,8 +514,7 @@ export default function Dashboard() {
           try {
             await navigator.share({
               title: 'Добавить в друзья',
-              text: 'Привет! Давай общаться по видеосвязи. Переходи по ссылке, чтобы добавить меня в друзья:',
-              url: link
+              text: `Привет! Давай общаться по видеосвязи. Переходи по ссылке, чтобы добавить меня в друзья:\n${link}`,
             });
           } catch (err) {
             console.error('Share failed', err);

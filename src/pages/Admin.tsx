@@ -90,8 +90,7 @@ export default function Admin() {
       try {
         await navigator.share({
           title: 'Приглашение в приложение',
-          text: 'Приглашаю тебя в наше закрытое приложение для видеозвонков. Используй эту ссылку для регистрации:',
-          url: link
+          text: `Приглашаю тебя в наше закрытое приложение для видеозвонков. Используй эту ссылку для регистрации:\n${link}`,
         });
       } catch (err) {
         console.error('Share failed', err);
