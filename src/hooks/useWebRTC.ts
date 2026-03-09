@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 
+const EMOJIS = ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🪲', '🪳', '🕷', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳', '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛', '🦏', '🐪', '🐫', '🦒', '🦘', '🐃', '🐂', '🐄', '🐎', '🐖', '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮', '🐕‍🦺', '🐈', '🐈‍⬛', '🪶', '🐓', '🦃', '🦤', '🦚', '🦜', '🦢', '🦩', '🕊', '🐇', '🦝', '🦨', '🦡', '🦦', '🦥', '🐁', '🐀', '🐿', '🦔'];
+
 export function useWebRTC(
   socket: any,
   localStreamRef: React.MutableRefObject<MediaStream | null>,
@@ -19,6 +21,42 @@ export function useWebRTC(
   const iceServersRef = useRef<RTCIceServer[] | null>(null);
 
   const [connectionState, setConnectionState] = useState<string>('new');
+  const [secureEmojis, setSecureEmojis] = useState<string[]>([]);
+
+  const computeEmojis = async (localSdp: string, remoteSdp: string) => {
+    try {
+      const extractFingerprint = (sdp: string) => {
+        const match = sdp.match(/a=fingerprint:sha-256\s+(.*)/i);
+        return match ? match[1].trim() : null;
+      };
+
+      const localFp = extractFingerprint(localSdp);
+      const remoteFp = extractFingerprint(remoteSdp);
+
+      if (!localFp || !remoteFp) {
+        console.warn('Could not extract fingerprints for emoji verification');
+        return;
+      }
+
+      // Sort to ensure both sides get the exact same combined string
+      const combined = [localFp, remoteFp].sort().join('|');
+      
+      const encoder = new TextEncoder();
+      const data = encoder.encode(combined);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      
+      const emojis = [];
+      for (let i = 0; i < 4; i++) {
+        const num = (hashArray[i * 2] << 8) | hashArray[i * 2 + 1];
+        emojis.push(EMOJIS[num % EMOJIS.length]);
+      }
+      
+      setSecureEmojis(emojis);
+    } catch (e) {
+      console.error('Error computing secure emojis:', e);
+    }
+  };
 
   const getIceServers = async (): Promise<RTCIceServer[]> => {
     if (iceServersRef.current) return iceServersRef.current;
@@ -48,12 +86,6 @@ export function useWebRTC(
     } catch (e) {
       console.error('Failed to fetch TURN credentials', e);
     }
-
-    // Always add public STUN servers as fallback (at the end)
-    servers.push(
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
-    );
 
     iceServersRef.current = servers;
     return servers;
@@ -258,6 +290,10 @@ export function useWebRTC(
         await peerConnection.current.setLocalDescription(answer);
         console.log('Sending WebRTC answer to', fromSocketId);
         socket.emit('webrtc_answer', { answer, toSocketId: fromSocketId });
+
+        if (peerConnection.current.localDescription && peerConnection.current.remoteDescription) {
+          computeEmojis(peerConnection.current.localDescription.sdp, peerConnection.current.remoteDescription.sdp);
+        }
       } catch (e) {
         console.error('Error handling offer:', e);
       }
@@ -270,6 +306,10 @@ export function useWebRTC(
           await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
           isRemoteDescriptionSet.current = true;
           await processIceQueue();
+
+          if (peerConnection.current.localDescription && peerConnection.current.remoteDescription) {
+            computeEmojis(peerConnection.current.localDescription.sdp, peerConnection.current.remoteDescription.sdp);
+          }
         } catch (e) {
           console.error('Error handling answer:', e);
         }
@@ -582,7 +622,8 @@ export function useWebRTC(
 
     setConnectionState('closed');
     setRemoteStreamRef.current(null);
+    setSecureEmojis([]);
   }, []);
 
-  return { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats };
+  return { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis };
 }

@@ -123,13 +123,6 @@ export function setupSocket(io: Server) {
       }
     });
 
-    socket.on('set_call_emojis', (data) => {
-      const { toSocketId, emojis } = data;
-      if (toSocketId) {
-        io.to(toSocketId).emit('call_emojis', { emojis });
-      }
-    });
-
     try {
       await updateSocketFriends(io, socket, userId);
     } catch (err) {

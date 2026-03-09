@@ -6,8 +6,6 @@ import { io, Socket } from 'socket.io-client';
 import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh } from 'lucide-react';
 import { useWebRTC } from '../hooks/useWebRTC';
 
-const EMOJIS = ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🪲', '🪳', '🕷', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳', '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛', '🦏', '🐪', '🐫', '🦒', '🦘', '🐃', '🐂', '🐄', '🐎', '🐖', '🐏', '🐑', '🦙', '🐐', '🦌', '🐕', '🐩', '🦮', '🐕‍🦺', '🐈', '🐈‍⬛', '🪶', '🐓', '🦃', '🦤', '🦚', '🦜', '🦢', '🦩', '🕊', '🐇', '🦝', '🦨', '🦡', '🦦', '🦥', '🐁', '🐀', '🐿', '🦔'];
-
 export default function Dashboard() {
   const { user, token, logout, onlineFriends, setOnlineFriends, addOnlineFriend, removeOnlineFriend } = useStore();
   const navigate = useNavigate();
@@ -29,7 +27,6 @@ export default function Dashboard() {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [activeCallUserId, setActiveCallUserId] = useState<number | null>(null);
   const [activeCallSocketId, setActiveCallSocketId] = useState<string | null>(null);
-  const [callEmojis, setCallEmojis] = useState<string[]>([]);
   
   // Debug info state
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -59,6 +56,7 @@ export default function Dashboard() {
   const constraintsRef = useRef<HTMLDivElement>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const isCleaningRef = useRef(false);
+  const isSwitchingCameraRef = useRef(false);
 
   const setAndStoreLocalStream = (stream: MediaStream | null) => {
     setLocalStream(stream);
@@ -106,7 +104,6 @@ export default function Dashboard() {
     setIncomingCall(null);
     setActiveCallUserId(null);
     setActiveCallSocketId(null);
-    setCallEmojis([]);
     
     setIsAudioMuted(false);
     setIsVideoMuted(false);
@@ -123,7 +120,7 @@ export default function Dashboard() {
     }, 300);
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -455,15 +452,6 @@ export default function Dashboard() {
         console.log('Initiating call after delay...');
         initiateCall(fromSocketId);
       }, 1500);
-      
-      // Generate and send emojis for key verification
-      const emojis = Array.from({ length: 4 }, () => EMOJIS[Math.floor(Math.random() * EMOJIS.length)]);
-      setCallEmojis(emojis);
-      newSocket.emit('set_call_emojis', { toSocketId: fromSocketId, emojis });
-    });
-
-    newSocket.on('call_emojis', ({ emojis }) => {
-      setCallEmojis(emojis);
     });
 
     newSocket.on('call_ended', (data) => {
@@ -664,8 +652,11 @@ export default function Dashboard() {
   };
 
   const switchCamera = async () => {
-    if (!localStream) return;
+    if (!localStream || isSwitchingCameraRef.current) return;
+    
+    isSwitchingCameraRef.current = true;
     const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: { 
@@ -676,6 +667,14 @@ export default function Dashboard() {
         audio: true
       });
       
+      // Stop ALL old tracks BEFORE updating state
+      if (activeStreamRef.current) {
+        activeStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      }
+      
       // Update local stream state
       setAndStoreLocalStream(newStream);
       setFacingMode(newFacingMode);
@@ -684,19 +683,16 @@ export default function Dashboard() {
       if (peerConnection?.current) {
         const videoTrack = newStream.getVideoTracks()[0];
         const videoSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          videoSender.replaceTrack(videoTrack);
+        if (videoSender && videoTrack) {
+          videoSender.replaceTrack(videoTrack).catch(e => console.error('Error replacing video track', e));
         }
 
         const audioTrack = newStream.getAudioTracks()[0];
         const audioSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'audio');
-        if (audioSender) {
-          audioSender.replaceTrack(audioTrack);
+        if (audioSender && audioTrack) {
+          audioSender.replaceTrack(audioTrack).catch(e => console.error('Error replacing audio track', e));
         }
       }
-      
-      // Stop ALL old tracks
-      localStream.getTracks().forEach(track => track.stop());
       
       // Apply current mute states to new stream
       newStream.getAudioTracks().forEach(track => track.enabled = !isAudioMuted);
@@ -704,6 +700,12 @@ export default function Dashboard() {
       
     } catch (err) {
       console.error('Failed to switch camera', err);
+      showToast('Не удалось переключить камеру');
+    } finally {
+      // Add a cooldown to prevent rapid clicking
+      setTimeout(() => {
+        isSwitchingCameraRef.current = false;
+      }, 500);
     }
   };
 
@@ -891,10 +893,10 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black z-50 flex flex-col" ref={constraintsRef}>
           {/* Top Bar with Emojis */}
           <div className="absolute top-0 left-0 right-0 p-6 flex justify-center z-20 pointer-events-none">
-            {callEmojis.length > 0 && (
+            {secureEmojis.length > 0 && (
               <div className="bg-zinc-900/40 backdrop-blur-md px-3 py-1 rounded-full border border-zinc-800/50 flex items-center gap-2 shadow-lg">
                 <div className="flex gap-1 text-lg">
-                  {callEmojis.map((emoji, i) => <span key={i}>{emoji}</span>)}
+                  {secureEmojis.map((emoji, i) => <span key={i}>{emoji}</span>)}
                 </div>
               </div>
             )}
