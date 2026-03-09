@@ -74,8 +74,17 @@ export function useWebRTC(
           servers.push({ urls: data.stunUrl });
         }
         if (data.turnUrl && data.turnUsername && data.turnCredential) {
-          const urls = data.turnUrl.split(',').map((u: string) => u.trim());
-          console.log('Using custom TURN servers:', urls);
+          const urls = data.turnUrl.split(',').map((u: string) => {
+            let url = u.trim();
+            // Force TCP transport if not explicitly specified
+            if (url.startsWith('turn:') || url.startsWith('turns:')) {
+              if (!url.includes('?transport=')) {
+                url += '?transport=tcp';
+              }
+            }
+            return url;
+          });
+          console.log('Using custom TURN servers (TCP enforced):', urls);
           servers.push({
             urls: urls,
             username: data.turnUsername,
@@ -160,6 +169,9 @@ export function useWebRTC(
 
       const pc = new RTCPeerConnection({
         iceServers: iceServers,
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
         // @ts-ignore - Required for older Android WebView compatibility
         sdpSemantics: 'unified-plan'
       } as RTCConfiguration);
@@ -388,6 +400,9 @@ export function useWebRTC(
 
     const pc = new RTCPeerConnection({
       iceServers: iceServers,
+      iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
       // @ts-ignore - Required for older Android WebView compatibility
       sdpSemantics: 'unified-plan'
     } as RTCConfiguration);
