@@ -16,8 +16,48 @@ export function useWebRTC(
   const isCallerRef = useRef<boolean>(false);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const restartAttemptsRef = useRef<number>(0);
+  const iceServersRef = useRef<RTCIceServer[] | null>(null);
 
   const [connectionState, setConnectionState] = useState<string>('new');
+
+  const getIceServers = async (): Promise<RTCIceServer[]> => {
+    if (iceServersRef.current) return iceServersRef.current;
+
+    let servers: RTCIceServer[] = [];
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/auth/turn', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.stunUrl) {
+          console.log('Using custom STUN server:', data.stunUrl);
+          servers.push({ urls: data.stunUrl });
+        }
+        if (data.turnUrl && data.turnUsername && data.turnCredential) {
+          const urls = data.turnUrl.split(',').map((u: string) => u.trim());
+          console.log('Using custom TURN servers:', urls);
+          servers.push({
+            urls: urls,
+            username: data.turnUsername,
+            credential: data.turnCredential
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch TURN credentials', e);
+    }
+
+    // Always add public STUN servers as fallback (at the end)
+    servers.push(
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    );
+
+    iceServersRef.current = servers;
+    return servers;
+  };
 
   useEffect(() => {
     socketRef.current = socket;
@@ -61,7 +101,7 @@ export function useWebRTC(
       }
     };
 
-    const createPeerConnection = (targetSocketId?: string) => {
+    const createPeerConnection = async (targetSocketId?: string) => {
       if (peerConnection.current && peerConnection.current.connectionState !== 'closed') {
         console.warn('Old PC still alive, forcing close...');
         peerConnection.current.close();
@@ -80,35 +120,7 @@ export function useWebRTC(
       if (targetSocketId) activeSocketIdRef.current = targetSocketId;
 
       // Configure ICE servers
-      let iceServers: RTCIceServer[] = [];
-
-      // Add custom STUN server if configured
-      const customStun = import.meta.env.VITE_STUN_URL;
-      if (customStun) {
-        console.log('Using custom STUN server:', customStun);
-        iceServers.push({ urls: customStun });
-      }
-
-      // Add TURN servers if configured
-      const turnUrls = import.meta.env.VITE_TURN_URL;
-      const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-      const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
-
-      if (turnUrls && turnUsername && turnCredential) {
-        const urls = turnUrls.split(',').map((u: string) => u.trim());
-        console.log('Using custom TURN servers:', urls);
-        iceServers.push({
-          urls: urls,
-          username: turnUsername,
-          credential: turnCredential
-        });
-      }
-
-      // Always add public STUN servers as fallback (at the end)
-      iceServers.push(
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      );
+      const iceServers = await getIceServers();
 
       if (peerConnection.current) {
         peerConnection.current.close();
@@ -229,7 +241,7 @@ export function useWebRTC(
       }
 
       isCallerRef.current = false;
-      peerConnection.current = createPeerConnection(fromSocketId);
+      peerConnection.current = await createPeerConnection(fromSocketId);
 
       try {
         await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
@@ -328,35 +340,7 @@ export function useWebRTC(
     console.log('Initiating call to', toSocketId);
     
     // Configure ICE servers
-    let iceServers: RTCIceServer[] = [];
-
-    // Add custom STUN server if configured
-    const customStun = import.meta.env.VITE_STUN_URL;
-    if (customStun) {
-      console.log('Using custom STUN server:', customStun);
-      iceServers.push({ urls: customStun });
-    }
-
-    // Add TURN servers if configured
-    const turnUrls = import.meta.env.VITE_TURN_URL;
-    const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-    const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
-
-    if (turnUrls && turnUsername && turnCredential) {
-      const urls = turnUrls.split(',').map((u: string) => u.trim());
-      console.log('Using custom TURN servers:', urls);
-      iceServers.push({
-        urls: urls,
-        username: turnUsername,
-        credential: turnCredential
-      });
-    }
-
-    // Always add public STUN servers as fallback (at the end)
-    iceServers.push(
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
-    );
+    const iceServers = await getIceServers();
 
     if (peerConnection.current) {
       peerConnection.current.close();

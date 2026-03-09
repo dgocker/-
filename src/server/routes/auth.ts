@@ -185,4 +185,13 @@ router.get('/me', authenticateToken, (req: AuthRequest, res) => {
   res.json({ user: req.user });
 });
 
+router.get('/turn', authenticateToken, (req: AuthRequest, res) => {
+  res.json({
+    stunUrl: process.env.STUN_URL || null,
+    turnUrl: process.env.TURN_URL || null,
+    turnUsername: process.env.TURN_USERNAME || null,
+    turnCredential: process.env.TURN_CREDENTIAL || null,
+  });
+});
+
 export default router;
