@@ -10,6 +10,12 @@ export default function Admin() {
   const [invites, setInvites] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   useEffect(() => {
     if (!token || user?.role !== 'admin') {
@@ -56,12 +62,14 @@ export default function Admin() {
       
       if (res.ok) {
         setUsers(users.filter(u => u.id !== userId));
+        showToast('Пользователь успешно удален');
       } else {
         const data = await res.json();
-        alert(data.error || 'Не удалось удалить пользователя');
+        showToast(data.error || 'Не удалось удалить пользователя');
       }
     } catch (err) {
       console.error('Failed to delete user', err);
+      showToast('Ошибка при удалении пользователя');
     }
   };
 
@@ -104,6 +112,13 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6 max-w-4xl mx-auto">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-zinc-800 text-white px-4 py-2 rounded-full shadow-lg border border-zinc-700 text-sm animate-in fade-in slide-in-from-top-4">
+          {toastMessage}
+        </div>
+      )}
+
       <header className="flex items-center justify-between mb-12">
         <div className="flex items-center gap-4">
           <button 

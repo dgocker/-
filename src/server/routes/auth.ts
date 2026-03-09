@@ -119,6 +119,11 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
         return res.status(403).json({ error: 'Требуется код приглашения для новых пользователей' });
       }
 
+      const isFriendInvite = inviteCode.startsWith('friend-');
+      if (isFriendInvite) {
+        return res.status(403).json({ error: 'Для регистрации требуется инвайт-код от администратора. Код друга не подходит для регистрации.' });
+      }
+
       const invite = await db.prepare('SELECT * FROM app_invites WHERE code = ? AND used_by IS NULL').get(inviteCode) as any;
       if (!invite) {
         return res.status(403).json({ error: 'Недействительный или уже использованный код приглашения' });

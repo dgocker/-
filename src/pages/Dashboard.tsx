@@ -15,6 +15,12 @@ export default function Dashboard() {
   const [friends, setFriends] = useState<any[]>([]);
   const [linkCopied, setLinkCopied] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  }, []);
   
   // Call state
   const [incomingCall, setIncomingCall] = useState<any>(null);
@@ -332,6 +338,11 @@ export default function Dashboard() {
       }
 
       if (code) {
+        if (sessionStorage.getItem(`processed_friend_code_${code}`)) {
+          localStorage.removeItem('pending_friend_code');
+          return;
+        }
+
         try {
           const res = await fetch('/api/friends/add', {
             method: 'POST',
@@ -345,7 +356,8 @@ export default function Dashboard() {
           const data = await res.json();
           
           if (res.ok) {
-            alert('Друг успешно добавлен!');
+            showToast('Друг успешно добавлен!');
+            sessionStorage.setItem(`processed_friend_code_${code}`, 'true');
             // Refresh friends list
             fetch('/api/friends', {
                headers: { Authorization: `Bearer ${token}` }
@@ -412,13 +424,13 @@ export default function Dashboard() {
     });
 
     newSocket.on('user_busy', () => {
-      alert('Пользователь занят');
+      showToast('Пользователь занят');
       handleCallEnded();
       cleanup();
     });
 
     newSocket.on('user_offline', () => {
-      alert('Пользователь не в сети');
+      showToast('Пользователь не в сети');
       handleCallEnded();
       cleanup();
     });
@@ -560,7 +572,7 @@ export default function Dashboard() {
       // Set timeout for connection (ACK) - 5 seconds
       if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = setTimeout(() => {
-        alert('Не удалось установить соединение');
+        showToast('Не удалось установить соединение');
         handleCallEnded();
       }, 5000);
 
@@ -568,13 +580,13 @@ export default function Dashboard() {
       if (dialingTimeoutRef.current) clearTimeout(dialingTimeoutRef.current);
       dialingTimeoutRef.current = setTimeout(() => {
         if (callActiveRef.current && !activeCallSocketIdRef.current) {
-          alert('Абонент не отвечает');
+          showToast('Абонент не отвечает');
           endCall();
         }
       }, 30000); // 30 seconds timeout
     } catch (err) {
       console.error('Failed to get media devices', err);
-      alert('Не удалось получить доступ к камере или микрофону');
+      showToast('Не удалось получить доступ к камере или микрофону');
     }
   };
 
@@ -606,7 +618,7 @@ export default function Dashboard() {
       setIncomingCall(null);
     } catch (err) {
       console.error('Failed to get media devices', err);
-      alert('Не удалось получить доступ к камере или микрофону');
+      showToast('Не удалось получить доступ к камере или микрофону');
     }
   };
 
@@ -671,14 +683,20 @@ export default function Dashboard() {
       // Replace track in peer connection if active
       if (peerConnection?.current) {
         const videoTrack = newStream.getVideoTracks()[0];
-        const sender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(videoTrack);
+        const videoSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(videoTrack);
+        }
+
+        const audioTrack = newStream.getAudioTracks()[0];
+        const audioSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'audio');
+        if (audioSender) {
+          audioSender.replaceTrack(audioTrack);
         }
       }
       
-      // Stop old video tracks
-      localStream.getVideoTracks().forEach(track => track.stop());
+      // Stop ALL old tracks
+      localStream.getTracks().forEach(track => track.stop());
       
       // Apply current mute states to new stream
       newStream.getAudioTracks().forEach(track => track.enabled = !isAudioMuted);
@@ -704,7 +722,7 @@ export default function Dashboard() {
           socket.emit('refresh_friends');
         }
       } else {
-        alert('Не удалось удалить друга');
+        showToast('Не удалось удалить друга');
       }
     } catch (err) {
       console.error('Failed to delete friend', err);
@@ -713,6 +731,13 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6 max-w-4xl mx-auto">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-zinc-800 text-white px-4 py-2 rounded-full shadow-lg border border-zinc-700 text-sm animate-in fade-in slide-in-from-top-4">
+          {toastMessage}
+        </div>
+      )}
+
       <header className="flex items-center justify-between mb-12">
         <div className="flex items-center gap-4">
           {user?.photo_url ? (

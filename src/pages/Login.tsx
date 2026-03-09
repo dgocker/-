@@ -18,6 +18,12 @@ export default function Login() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [hasInvite, setHasInvite] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   useEffect(() => {
     // 1. Immediately save invite code from URL to localStorage if present
@@ -94,31 +100,13 @@ export default function Login() {
             setToken(data.token);
             setUser(data.user);
             
-            // Check for pending friend code
-            const pendingFriendCode = localStorage.getItem('pending_friend_code');
-            if (pendingFriendCode) {
-              try {
-                 await fetch('/api/friends/add', {
-                   method: 'POST',
-                   headers: { 
-                     'Content-Type': 'application/json',
-                     'Authorization': `Bearer ${data.token}`
-                   },
-                   body: JSON.stringify({ code: pendingFriendCode })
-                 });
-                 localStorage.removeItem('pending_friend_code');
-              } catch (e) {
-                console.error('Failed to auto-add friend after login', e);
-              }
-            }
-
             navigate('/');
           } else {
-            alert(data.error || 'Ошибка входа');
+            showToast(data.error || 'Ошибка входа');
           }
         } catch (err) {
           console.error('Login error:', err);
-          alert('Произошла ошибка при входе.');
+          showToast('Произошла ошибка при входе.');
         }
       }
     };
@@ -159,24 +147,6 @@ export default function Login() {
           setToken(data.token);
           setUser(data.user);
           
-          // Check for pending friend code (from start_param or localStorage)
-          const pendingFriendCode = localStorage.getItem('pending_friend_code');
-          if (pendingFriendCode) {
-             try {
-               await fetch('/api/friends/add', {
-                 method: 'POST',
-                 headers: { 
-                   'Content-Type': 'application/json',
-                   'Authorization': `Bearer ${data.token}`
-                 },
-                 body: JSON.stringify({ code: pendingFriendCode })
-               });
-               localStorage.removeItem('pending_friend_code');
-             } catch (e) {
-               console.error('Failed to auto-add friend', e);
-             }
-          }
-
           navigate('/');
         } else {
           // If auto-login fails (e.g. need invite code), show error or stay on login
@@ -202,10 +172,21 @@ export default function Login() {
       containerRef.current.innerHTML = '';
       containerRef.current.appendChild(script);
     }
+
+    return () => {
+      delete (window as any).TelegramLoginWidget;
+    };
   }, [location, navigate, setToken, setUser]);
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-zinc-950">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-zinc-800 text-white px-4 py-2 rounded-full shadow-lg border border-zinc-700 text-sm animate-in fade-in slide-in-from-top-4">
+          {toastMessage}
+        </div>
+      )}
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
