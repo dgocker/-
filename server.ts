@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -15,6 +16,7 @@ import friendRoutes from './src/server/routes/friends.js';
 dotenv.config();
 
 const PORT = 3000;
+const SECRET_TOKEN = process.env.RELAY_TOKEN || 'super-secret-anti-dpi-token-2026';
 
 async function startServer() {
   const app = express();
@@ -31,6 +33,62 @@ async function startServer() {
     }
   });
   setupSocket(io);
+
+  // Setup Secure WebSocket Relay (Anti-DPI)
+  const wss = new WebSocketServer({ noServer: true });
+  const rooms = new Map<string, Set<WebSocket>>();
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url || '', `http://${request.headers.host}`);
+    
+    if (url.pathname.startsWith('/secure-relay')) {
+      const token = url.searchParams.get('token');
+      if (token === SECRET_TOKEN) {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit('connection', ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    }
+    // If it's not /secure-relay, we do nothing and let socket.io handle its own upgrades
+  });
+
+  wss.on('connection', (ws, request) => {
+    const urlParams = new URLSearchParams(request.url?.split('?')[1] || '');
+    const roomId = urlParams.get('room');
+
+    if (!roomId) {
+      ws.close();
+      return;
+    }
+
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, new Set());
+    }
+    rooms.get(roomId)!.add(ws);
+
+    ws.on('message', (message, isBinary) => {
+      const roomClients = rooms.get(roomId);
+      if (roomClients) {
+        roomClients.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(message, { binary: isBinary });
+          }
+        });
+      }
+    });
+
+    ws.on('close', () => {
+      const roomClients = rooms.get(roomId);
+      if (roomClients) {
+        roomClients.delete(ws);
+        if (roomClients.size === 0) {
+          rooms.delete(roomId);
+        }
+      }
+    });
+  });
 
   app.use(cors());
   app.use(express.json());
