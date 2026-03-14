@@ -152,55 +152,88 @@ export function useSecureRelayCall(
     }
   };
 
-  const playAudioChunk = async (chunk: ArrayBuffer) => {
-    try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        addLog('🎙️ AudioContext initialized');
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-        addLog('🎙️ AudioContext resumed');
-      }
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioSourceBufferRef = useRef<SourceBuffer | null>(null);
+  const audioMediaSourceRef = useRef<MediaSource | null>(null);
+  const audioQueueRef = useRef<Uint8Array[]>([]);
+  const isAudioAppendingRef = useRef(false);
 
-      // If we don't have a header, this might be it (first chunk)
-      // WebM headers are usually > 100 bytes, MP4 headers can be larger
-      if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
-        audioHeaderRef.current = new Uint8Array(chunk);
-        addLog(`🎙️ Saved audio header (${chunk.byteLength} bytes)`);
-        return;
-      }
-
-      // Prepend header to chunk to make it decodable as a standalone piece
-      const fullData = new Uint8Array(audioHeaderRef.current.length + chunk.byteLength);
-      fullData.set(audioHeaderRef.current);
-      fullData.set(new Uint8Array(chunk), audioHeaderRef.current.length);
-
-      // decodeAudioData can fail on fragmented MP4, but we try anyway as last resort
-      ctx.decodeAudioData(fullData.buffer, (buffer) => {
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        source.start(0);
-        
-        audioChunkCountRef.current++;
-        const now = Date.now();
-        if (now - lastAudioLogTimeRef.current > 10000) { // Log every 10 seconds
-          addLog(`🔊 Audio playback active: ${audioChunkCountRef.current} chunks decoded`);
-          lastAudioLogTimeRef.current = now;
-        }
-      }, (err) => {
-        // Silent fail for small chunks that can't be decoded
-        const now = Date.now();
-        if (now - lastAudioLogTimeRef.current > 30000) {
-          addLog(`⚠️ Audio decoding failed for a chunk: ${err}. Header size: ${audioHeaderRef.current?.length}`);
-          lastAudioLogTimeRef.current = now;
-        }
-      });
-    } catch (e) {
-      // decodeAudioData often fails on partial chunks, this is expected
+  // Initialize audio element
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = document.createElement('audio');
+      audioRef.current.autoplay = true;
+      audioRef.current.playsInline = true;
+      document.body.appendChild(audioRef.current);
     }
+    return () => {
+      if (audioRef.current) {
+        document.body.removeChild(audioRef.current);
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  const initAudioMediaSource = () => {
+    if (audioMediaSourceRef.current) return;
+    
+    const mediaSource = new MediaSource();
+    audioMediaSourceRef.current = mediaSource;
+    if (audioRef.current) {
+      audioRef.current.src = URL.createObjectURL(mediaSource);
+    }
+
+    mediaSource.addEventListener('sourceopen', () => {
+      addLog('🎙️ Audio MediaSource sourceopen');
+      try {
+        // Use AAC-LC codec
+        const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
+        audioSourceBufferRef.current = mediaSource.addSourceBuffer(mimeType);
+        audioSourceBufferRef.current.addEventListener('updateend', () => {
+          isAudioAppendingRef.current = false;
+          processAudioQueue();
+        });
+        processAudioQueue();
+      } catch (e) {
+        addLog(`❌ Audio SourceBuffer error: ${e}`);
+      }
+    });
+  };
+
+  const processAudioQueue = () => {
+    if (!audioSourceBufferRef.current || isAudioAppendingRef.current || audioQueueRef.current.length === 0) return;
+    
+    try {
+      if (!audioSourceBufferRef.current.updating) {
+        isAudioAppendingRef.current = true;
+        const data = audioQueueRef.current.shift();
+        if (data) audioSourceBufferRef.current.appendBuffer(data);
+      }
+    } catch (e) {
+      console.error('Error appending audio buffer', e);
+      isAudioAppendingRef.current = false;
+    }
+  };
+
+  const playAudioChunk = async (chunk: ArrayBuffer) => {
+    // If we don't have a header, this might be it (first chunk)
+    if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
+      audioHeaderRef.current = new Uint8Array(chunk);
+      addLog(`🎙️ Saved audio header (${chunk.byteLength} bytes)`);
+      
+      // Initialize MediaSource with header
+      initAudioMediaSource();
+      if (audioSourceBufferRef.current && !audioSourceBufferRef.current.updating) {
+        audioSourceBufferRef.current.appendBuffer(audioHeaderRef.current);
+      } else {
+        audioQueueRef.current.push(audioHeaderRef.current);
+      }
+      return;
+    }
+
+    // Queue chunk
+    audioQueueRef.current.push(new Uint8Array(chunk));
+    processAudioQueue();
   };
 
   const startRecording = () => {
