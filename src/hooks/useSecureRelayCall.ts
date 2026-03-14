@@ -174,93 +174,86 @@ export function useSecureRelayCall(
     };
   }, []);
 
-  const initAudioMediaSource = () => {
-    if (audioMediaSourceRef.current) return;
-    
-    const mediaSource = new MediaSource();
-    audioMediaSourceRef.current = mediaSource;
-    if (audioRef.current) {
-      audioRef.current.src = URL.createObjectURL(mediaSource);
-    }
+  // === Аудио fallback плеер ===
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const mediaSrcRef = useRef<ManagedMediaSource | MediaSource | null>(null);
+  const audioBufferRef = useRef<SourceBuffer | null>(null);
+  const audioQueueRef = useRef<ArrayBuffer[]>([]);
+  const isAppendingRef = useRef(false);
+  const audioInitHeaderRef = useRef<ArrayBuffer | null>(null);
+  const AUDIO_MIME = 'audio/mp4; codecs="mp4a.40.2"';
 
-    mediaSource.addEventListener('sourceopen', () => {
-      addLog('🎙️ Audio MediaSource sourceopen');
-      try {
-        // Use AAC-LC codec
-        const mimeType = 'audio/mp4; codecs="mp4a.40.2"';
-        audioSourceBufferRef.current = mediaSource.addSourceBuffer(mimeType);
-        audioSourceBufferRef.current.addEventListener('updateend', () => {
-          isAudioAppendingRef.current = false;
-          processAudioQueue();
-        });
-        processAudioQueue();
-      } catch (e) {
-        addLog(`❌ Audio SourceBuffer error: ${e}`);
+  const drainAudioQueue = () => {
+    isAppendingRef.current = false;
+    if (audioQueueRef.current.length > 0 && audioBufferRef.current && !audioBufferRef.current.updating) {
+      const nextChunk = audioQueueRef.current.shift();
+      if (nextChunk) {
+        isAppendingRef.current = true;
+        audioBufferRef.current.appendBuffer(nextChunk);
+        addLog(`🎙️ Appending chunk (${nextChunk.byteLength} bytes)`);
       }
-    });
-  };
-
-  const processAudioQueue = () => {
-    if (!audioSourceBufferRef.current || isAudioAppendingRef.current || audioQueueRef.current.length === 0) return;
-    
-    try {
-      if (!audioSourceBufferRef.current.updating) {
-        isAudioAppendingRef.current = true;
-        const data = audioQueueRef.current.shift();
-        if (data) audioSourceBufferRef.current.appendBuffer(data);
-      }
-    } catch (e) {
-      console.error('Error appending audio buffer', e);
-      isAudioAppendingRef.current = false;
     }
   };
 
-  const playAudioChunk = async (chunk: ArrayBuffer) => {
-    addLog(`🎙️ playAudioChunk received ${chunk.byteLength} bytes`);
-    
-    // Ensure AudioContext is running
-    if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        addLog('🎙️ AudioContext initialized');
-    }
-    if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-        addLog('🎙️ AudioContext resumed');
-    }
+  const initAudioPlayer = () => {
+    if (audioPlayerRef.current) return;
 
-    // If we don't have a header, this might be it (first chunk)
-    if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
-      audioHeaderRef.current = new Uint8Array(chunk);
-      addLog(`🎙️ Saved audio header (${chunk.byteLength} bytes)`);
-      
-      // Ensure AudioContext is running before MediaSource initialization
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        addLog('🎙️ AudioContext initialized');
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-        addLog('🎙️ AudioContext resumed');
-      }
+    audioPlayerRef.current = document.createElement('audio');
+    audioPlayerRef.current.style.display = 'none';
+    audioPlayerRef.current.autoplay = true;
+    audioPlayerRef.current.playsInline = true;
+    audioPlayerRef.current.volume = 1.0;
+    document.body.appendChild(audioPlayerRef.current);
 
-      // Initialize MediaSource with header
-      initAudioMediaSource();
-      if (audioSourceBufferRef.current && !audioSourceBufferRef.current.updating) {
-        audioSourceBufferRef.current.appendBuffer(audioHeaderRef.current);
-      } else {
-        audioQueueRef.current.push(audioHeaderRef.current);
-      }
-      
-      // Force play audio element
-      if (audioRef.current) {
-        audioRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
-      }
+    const MSClass = (window as any).ManagedMediaSource || window.MediaSource;
+    if (!MSClass) {
+      addLog('🎙️ MediaSource not supported');
       return;
     }
 
-    // Queue chunk
-    audioQueueRef.current.push(new Uint8Array(chunk));
-    processAudioQueue();
+    const mediaSrc = new MSClass();
+    mediaSrcRef.current = mediaSrc;
+    audioPlayerRef.current.src = URL.createObjectURL(mediaSrc);
+
+    mediaSrc.addEventListener('sourceopen', () => {
+      addLog(`🎙️ MediaSource opened (readyState: ${mediaSrc.readyState})`);
+      try {
+        audioBufferRef.current = mediaSrc.addSourceBuffer(AUDIO_MIME);
+        audioBufferRef.current.mode = 'segments';
+
+        if (audioInitHeaderRef.current) {
+          audioBufferRef.current.appendBuffer(audioInitHeaderRef.current);
+          addLog(`🎙️ Init header appended immediately (${audioInitHeaderRef.current.byteLength} bytes)`);
+        }
+
+        audioBufferRef.current.addEventListener('updateend', drainAudioQueue);
+      } catch (err) {
+        addLog(`🎙️ addSourceBuffer failed: ${err}`);
+      }
+    });
+
+    audioPlayerRef.current.play().catch(err => addLog(`🎙️ Autoplay prevented: ${err}`));
+    addLog('🎙️ Audio player initialized');
+  };
+
+  const playAudioChunk = async (chunk: ArrayBuffer) => {
+    const size = chunk.byteLength;
+
+    if (!audioInitHeaderRef.current && size < 1000) {
+      audioInitHeaderRef.current = chunk;
+      addLog(`🎙️ Saved audio header (${size} bytes)`);
+      initAudioPlayer();
+      return;
+    }
+
+    if (audioBufferRef.current && !audioBufferRef.current.updating && !isAppendingRef.current) {
+      isAppendingRef.current = true;
+      audioBufferRef.current.appendBuffer(chunk);
+      addLog(`🎙️ Appending chunk (${size} bytes)`);
+    } else {
+      audioQueueRef.current.push(chunk);
+      addLog(`🎙️ Queuing chunk (${size} bytes)`);
+    }
   };
 
   const startRecording = () => {
