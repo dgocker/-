@@ -130,7 +130,7 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, remoteJpeg } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -942,6 +942,14 @@ export default function Dashboard() {
                 disablePictureInPicture
                 className="w-full h-full object-cover"
               />
+              {remoteJpeg && (
+                <img 
+                  src={remoteJpeg} 
+                  alt="Remote" 
+                  className="absolute inset-0 w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              )}
               {autoplayFailed && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-30 p-6 text-center">
                   <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4 animate-pulse">

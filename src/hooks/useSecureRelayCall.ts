@@ -14,6 +14,7 @@ export function useSecureRelayCall(
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '' });
+  const [remoteJpeg, setRemoteJpeg] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const queueRef = useRef<Uint8Array[]>([]);
@@ -34,6 +35,7 @@ export function useSecureRelayCall(
   const pingIntervalRef = useRef<number | null>(null);
   const lastAudioLogTimeRef = useRef<number>(0);
   const audioChunkCountRef = useRef<number>(0);
+  const firstJpegReceivedRef = useRef<boolean>(false);
 
   const startPing = (ws: WebSocket) => {
     if (pingIntervalRef.current) window.clearInterval(pingIntervalRef.current);
@@ -62,6 +64,12 @@ export function useSecureRelayCall(
     }
     if (fallbackVideoRef.current) {
       fallbackVideoRef.current.srcObject = null;
+      fallbackVideoRef.current.remove();
+      fallbackVideoRef.current = null;
+    }
+    if (fallbackCanvasRef.current) {
+      fallbackCanvasRef.current.remove();
+      fallbackCanvasRef.current = null;
     }
     if (remoteImgRef.current) {
       remoteImgRef.current.remove();
@@ -83,6 +91,8 @@ export function useSecureRelayCall(
     currentRoomIdRef.current = null;
     remoteSupportsWebMRef.current = true;
     audioHeaderRef.current = null;
+    firstJpegReceivedRef.current = false;
+    setRemoteJpeg(null);
     if (remoteVideoRef.current) {
       remoteVideoRef.current.src = '';
     }
@@ -141,10 +151,12 @@ export function useSecureRelayCall(
     try {
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        addLog('🎙️ AudioContext initialized');
       }
       const ctx = audioContextRef.current;
       if (ctx.state === 'suspended') {
         await ctx.resume();
+        addLog('🎙️ AudioContext resumed');
       }
 
       // If we don't have a header, this might be it (first chunk)
@@ -267,11 +279,21 @@ export function useSecureRelayCall(
       fallbackVideoRef.current = document.createElement('video');
       fallbackVideoRef.current.muted = true;
       fallbackVideoRef.current.playsInline = true;
+      fallbackVideoRef.current.style.display = 'none';
+      document.body.appendChild(fallbackVideoRef.current);
+    }
+    
+    if (!fallbackCanvasRef.current) {
+      fallbackCanvasRef.current = document.createElement('canvas');
+      fallbackCanvasRef.current.style.display = 'none';
+      document.body.appendChild(fallbackCanvasRef.current);
     }
     
     const canvas = fallbackCanvasRef.current;
     const ctx = canvas.getContext('2d', { alpha: false });
     const video = fallbackVideoRef.current;
+    
+    let framesSent = 0;
     
     if (video.srcObject !== activeStreamRef.current) {
       video.srcObject = activeStreamRef.current;
@@ -300,6 +322,10 @@ export function useSecureRelayCall(
           if (wsRef.current.readyState === WebSocket.OPEN) {
             try {
               wsRef.current.send(dataUrl);
+              framesSent++;
+              if (framesSent === 1) {
+                addLog('📸 First JPEG frame sent');
+              }
             } catch (e) {
               console.error('Error sending JPEG frame:', e);
             }
@@ -319,11 +345,18 @@ export function useSecureRelayCall(
       addLog(`🎙️ Found ${audioTracks.length} audio tracks for fallback`);
 
       let audioMimeType = 'audio/webm; codecs=opus';
-      if (!MediaRecorder.isTypeSupported(audioMimeType)) {
-        audioMimeType = 'audio/webm';
-      }
-      if (!MediaRecorder.isTypeSupported(audioMimeType)) {
-        audioMimeType = 'audio/mp4'; // iOS fallback
+      
+      // If remote doesn't support WebM (likely iOS), we MUST use MP4/AAC for them to hear us
+      if (!remoteSupportsWebMRef.current && MediaRecorder.isTypeSupported('audio/mp4')) {
+        audioMimeType = 'audio/mp4';
+        addLog('🎙️ Remote is iOS/No-WebM, forcing audio/mp4 for compatibility');
+      } else {
+        if (!MediaRecorder.isTypeSupported(audioMimeType)) {
+          audioMimeType = 'audio/webm';
+        }
+        if (!MediaRecorder.isTypeSupported(audioMimeType)) {
+          audioMimeType = 'audio/mp4'; // iOS fallback
+        }
       }
 
       addLog(`🎙️ Starting audio recording with mimeType: ${audioMimeType}`);
@@ -505,21 +538,14 @@ export function useSecureRelayCall(
         } catch (e) {}
 
         if (event.data.startsWith('data:image/jpeg')) {
-          // Handle JPEG fallback frame
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.style.display = 'none'; // Hide video element
-            
-            if (!remoteImgRef.current) {
-              remoteImgRef.current = document.createElement('img');
-              remoteImgRef.current.className = remoteVideoRef.current.className;
-              remoteImgRef.current.style.display = 'block';
-              remoteImgRef.current.style.width = '100%';
-              remoteImgRef.current.style.height = '100%';
-              remoteImgRef.current.style.objectFit = 'cover';
-              remoteVideoRef.current.parentElement?.appendChild(remoteImgRef.current);
-              addLog('ℹ️ Switched to JPEG fallback display');
-            }
-            remoteImgRef.current.src = event.data;
+          setRemoteJpeg(event.data);
+          if (!firstJpegReceivedRef.current) {
+            firstJpegReceivedRef.current = true;
+            addLog('📸 Received first JPEG frame from remote');
+          }
+          if (remoteVideoRef.current && remoteVideoRef.current.style.display !== 'none') {
+            remoteVideoRef.current.style.display = 'none';
+            addLog('ℹ️ Switched to JPEG fallback display');
           }
         }
       } else if (event.data instanceof ArrayBuffer) {
@@ -589,9 +615,16 @@ export function useSecureRelayCall(
     joinRoom,
     startRecording,
     setRemoteSupportsWebM,
+    remoteJpeg,
     resumeAudio: async () => {
-      if (audioContextRef.current) {
-        await audioContextRef.current.resume();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        addLog('🎙️ AudioContext initialized via manual action');
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+        addLog('🎙️ AudioContext resumed via manual action');
       }
       if (remoteVideoRef.current) {
         remoteVideoRef.current.play().catch(() => {});
