@@ -87,6 +87,7 @@ export function useSecureRelayCall(
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    cleanupPCMAudio();
     if (pingIntervalRef.current) {
       window.clearInterval(pingIntervalRef.current);
       pingIntervalRef.current = null;
@@ -152,95 +153,73 @@ export function useSecureRelayCall(
     }
   };
 
-  // === Аудио fallback плеер ===
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const mediaSrcRef = useRef<any | MediaSource | null>(null);
-  const audioBufferRef = useRef<SourceBuffer | null>(null);
-  const audioQueueRef = useRef<ArrayBuffer[]>([]);
-  const isAudioAppendingRef = useRef(false);
-  const audioInitHeaderRef = useRef<ArrayBuffer | null>(null);
-  const AUDIO_MIME = 'audio/mp4; codecs="mp4a.40.2"';
-
-  const drainAudioQueue = () => {
-    isAudioAppendingRef.current = false;
-    if (audioQueueRef.current.length > 0 && audioBufferRef.current && !audioBufferRef.current.updating) {
-      const nextChunk = audioQueueRef.current.shift();
-      if (nextChunk) {
-        isAudioAppendingRef.current = true;
-        audioBufferRef.current.appendBuffer(nextChunk);
-        addLog(`🎙️ Appending chunk (${nextChunk.byteLength} bytes)`);
-      }
-    }
-    // Форсируем play, если Safari «уснул»
-    if (audioPlayerRef.current && audioPlayerRef.current.paused) {
-      audioPlayerRef.current.play().catch(e => addLog(`🎙️ Play error: ${e}`));
-    }
-  };
-
-  const initAudioPlayer = () => {
-    if (audioPlayerRef.current) return;
-
-    audioPlayerRef.current = document.createElement('video'); // ← КЛЮЧЕВОЙ ХАК
-    audioPlayerRef.current.style.display = 'none';
-    audioPlayerRef.current.muted = false;
-    audioPlayerRef.current.volume = 1.0;
-    audioPlayerRef.current.playsInline = true;
-    document.body.appendChild(audioPlayerRef.current);
-
-    const MSClass = (window as any).ManagedMediaSource || window.MediaSource;
-    if (!MSClass) {
-      addLog('🎙️ MediaSource not supported');
-      return;
-    }
-
-    const mediaSrc = new MSClass();
-    mediaSrcRef.current = mediaSrc;
-    audioPlayerRef.current.src = URL.createObjectURL(mediaSrc);
-
-    mediaSrc.addEventListener('sourceopen', () => {
-      addLog(`🎙️ MediaSource opened (readyState: ${mediaSrc.readyState})`);
-      try {
-        audioBufferRef.current = mediaSrc.addSourceBuffer(AUDIO_MIME);
-        audioBufferRef.current.mode = 'segments';
-
-        // Если заголовок пришел до открытия, добавляем его сейчас
-        if (audioInitHeaderRef.current) {
-          audioBufferRef.current.appendBuffer(audioInitHeaderRef.current);
-          addLog(`🎙️ Init header appended in sourceopen (${audioInitHeaderRef.current.byteLength} bytes)`);
-          audioInitHeaderRef.current = null; // Очищаем, так как добавили
-        }
-
-        audioBufferRef.current.addEventListener('updateend', drainAudioQueue);
-      } catch (err) {
-        addLog(`🎙️ addSourceBuffer failed: ${err}`);
-      }
-    });
-
-    // Форсируем запуск воспроизведения
-    setTimeout(() => {
-      audioPlayerRef.current?.play().catch(err => addLog(`🎙️ Autoplay: ${err}`));
-    }, 100);
-    addLog('🎙️ Audio player initialized');
-  };
+  // PCM Audio Receiver
+  const receiverAudioContextRef = useRef<AudioContext | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
+  const SAMPLE_RATE = 16000;
 
   const playAudioChunk = async (chunk: ArrayBuffer) => {
-    const size = chunk.byteLength;
-
-    if (!audioInitHeaderRef.current && size < 1000) {
-      audioInitHeaderRef.current = chunk;
-      addLog(`🎙️ Saved audio header (${size} bytes)`);
-      initAudioPlayer();
-      return;
+    if (!receiverAudioContextRef.current) {
+      receiverAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+      addLog('🎙️ PCM receiver initialized');
     }
 
-    if (audioBufferRef.current && !audioBufferRef.current.updating && !isAudioAppendingRef.current) {
-      isAudioAppendingRef.current = true;
-      audioBufferRef.current.appendBuffer(chunk);
-      addLog(`🎙️ Appending chunk (${size} bytes)`);
-    } else {
-      audioQueueRef.current.push(chunk);
-      addLog(`🎙️ Queuing chunk (${size} bytes)`);
+    const ctx = receiverAudioContextRef.current;
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    const pcm16 = new Int16Array(chunk);
+    const float32 = new Float32Array(pcm16.length);
+
+    for (let i = 0; i < pcm16.length; i++) {
+      float32[i] = pcm16[i] / 32768;
     }
+
+    const audioBuffer = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+    audioBuffer.copyToChannel(float32, 0);
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+
+    const playTime = Math.max(nextPlayTimeRef.current, ctx.currentTime + 0.05);
+    source.start(playTime);
+    nextPlayTimeRef.current = playTime + audioBuffer.duration;
+  };
+
+  const cleanupPCMAudio = () => {
+    if (receiverAudioContextRef.current) {
+      receiverAudioContextRef.current.close();
+      receiverAudioContextRef.current = null;
+    }
+    nextPlayTimeRef.current = 0;
+  };
+
+  const startPCMAudioSender = (stream: MediaStream) => {
+    if (audioContextRef.current) return;
+
+    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    const source = audioContextRef.current.createMediaStreamSource(stream);
+    
+    // 16 kHz mono, буфер 1024 сэмпла (~64 мс)
+    const scriptProcessor = audioContextRef.current.createScriptProcessor(1024, 1, 1);
+
+    scriptProcessor.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0);
+      const pcm16 = new Int16Array(inputData.length);
+
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]));
+        pcm16[i] = s < 0 ? s * 32768 : s * 32767;
+      }
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(addPadding(pcm16.buffer, 1)); // 1 = PCM
+      }
+    };
+
+    source.connect(scriptProcessor);
+    scriptProcessor.connect(audioContextRef.current.destination);
+    addLog('🎙️ PCM sender started');
   };
 
   const startRecording = () => {
@@ -256,6 +235,10 @@ export function useSecureRelayCall(
     if (fallbackIntervalRef.current) {
       window.clearInterval(fallbackIntervalRef.current);
       fallbackIntervalRef.current = null;
+    }
+
+    if (activeStreamRef.current) {
+      startPCMAudioSender(activeStreamRef.current);
     }
 
     if (activeStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -612,18 +595,12 @@ export function useSecureRelayCall(
         // Handle padded buffer
         const { data: unpaddedData, type } = removePadding(event.data);
         
-        // If we are in fallback mode or the type is MP4, we might need special handling
-        const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
-        
         if (type === 0 && !isMediaSourceFailed && sourceBufferRef.current) {
           // Video/Audio WebM
           queueRef.current.push(new Uint8Array(unpaddedData));
           processQueue();
         } else if (type === 1) {
-          // Audio MP4
-          playAudioChunk(unpaddedData);
-        } else if (type === 0 && isMediaSourceFailed) {
-          // Audio WebM fallback
+          // Audio PCM
           playAudioChunk(unpaddedData);
         }
       }
@@ -685,10 +662,6 @@ export function useSecureRelayCall(
       }
       if (remoteVideoRef.current) {
         remoteVideoRef.current.play().catch(() => {});
-      }
-      if (audioPlayerRef.current) {
-        addLog('🎙️ Manually playing audio element');
-        audioPlayerRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
       }
     }
   };
