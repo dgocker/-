@@ -233,12 +233,27 @@ export function useSecureRelayCall(
       audioHeaderRef.current = new Uint8Array(chunk);
       addLog(`🎙️ Saved audio header (${chunk.byteLength} bytes)`);
       
+      // Ensure AudioContext is running before MediaSource initialization
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        addLog('🎙️ AudioContext initialized');
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+        addLog('🎙️ AudioContext resumed');
+      }
+
       // Initialize MediaSource with header
       initAudioMediaSource();
       if (audioSourceBufferRef.current && !audioSourceBufferRef.current.updating) {
         audioSourceBufferRef.current.appendBuffer(audioHeaderRef.current);
       } else {
         audioQueueRef.current.push(audioHeaderRef.current);
+      }
+      
+      // Force play audio element
+      if (audioRef.current) {
+        audioRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
       }
       return;
     }
