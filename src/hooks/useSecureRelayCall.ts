@@ -372,7 +372,7 @@ export function useSecureRelayCall(
       const audioStream = new MediaStream(audioTracks);
       const audioRecorder = new MediaRecorder(audioStream, { 
         mimeType: audioMimeType,
-        audioBitsPerSecond: 32000 // Low bitrate for stability
+        audioBitsPerSecond: 128000 // Increased bitrate
       });
       audioRecorderRef.current = audioRecorder;
       
