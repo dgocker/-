@@ -63,6 +63,10 @@ async function startServer() {
       return;
     }
 
+    // Heartbeat setup
+    (ws as any).isAlive = true;
+    ws.on('pong', () => { (ws as any).isAlive = true; });
+
     if (!rooms.has(roomId)) {
       rooms.set(roomId, new Set());
     }
@@ -73,10 +77,19 @@ async function startServer() {
       if (roomClients) {
         roomClients.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(message, { binary: isBinary });
+            try {
+              client.send(message, { binary: isBinary });
+            } catch (e) {
+              console.error('Relay send error:', e);
+              client.terminate();
+            }
           }
         });
       }
+    });
+
+    ws.on('error', (err) => {
+      console.error('Relay WebSocket error:', err);
     });
 
     ws.on('close', () => {
@@ -88,6 +101,19 @@ async function startServer() {
         }
       }
     });
+  });
+
+  // Interval to check for dead connections
+  const interval = setInterval(() => {
+    wss.clients.forEach((ws: any) => {
+      if (ws.isAlive === false) return ws.terminate();
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on('close', () => {
+    clearInterval(interval);
   });
 
   app.use(cors());

@@ -99,11 +99,18 @@ export function useSecureRelayCall(
 
   const startRecording = () => {
     addLog('🎥 Starting media recording...');
+    
+    // Stop any existing recording or fallback
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping MediaRecorder:', e);
+      }
     }
     if (fallbackIntervalRef.current) {
       window.clearInterval(fallbackIntervalRef.current);
+      fallbackIntervalRef.current = null;
     }
 
     if (activeStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -111,6 +118,7 @@ export function useSecureRelayCall(
       let mimeType = 'video/webm; codecs="vp8, opus"';
       let canUseMediaRecorder = false;
 
+      // Check if we can use MediaRecorder for high-quality streaming
       if (isMediaRecorderSupported && remoteSupportsWebMRef.current) {
         if (MediaRecorder.isTypeSupported(mimeType)) {
           canUseMediaRecorder = true;
@@ -123,13 +131,21 @@ export function useSecureRelayCall(
       if (canUseMediaRecorder) {
         try {
           addLog(`✅ Using MediaRecorder with mimeType: ${mimeType}`);
-          const recorder = new MediaRecorder(activeStreamRef.current, { mimeType });
+          const recorder = new MediaRecorder(activeStreamRef.current, { 
+            mimeType,
+            videoBitsPerSecond: 250000 // 250kbps for stability
+          });
           mediaRecorderRef.current = recorder;
           recorder.ondataavailable = async (event) => {
             if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-              const buffer = await event.data.arrayBuffer();
-              const paddedData = addPadding(buffer);
-              wsRef.current.send(paddedData);
+              try {
+                const buffer = await event.data.arrayBuffer();
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(addPadding(buffer));
+                }
+              } catch (e) {
+                console.error('Error sending media chunk:', e);
+              }
             }
           };
           recorder.start(200);
@@ -153,7 +169,7 @@ export function useSecureRelayCall(
       }
       
       const canvas = fallbackCanvasRef.current;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: false });
       const video = fallbackVideoRef.current;
       
       if (video.srcObject !== activeStreamRef.current) {
@@ -164,17 +180,32 @@ export function useSecureRelayCall(
         });
       }
 
+      // Lower frequency and quality for stability
       fallbackIntervalRef.current = window.setInterval(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN && video.videoWidth > 0) {
-          // Downscale slightly for better performance over WebSocket
-          const scale = 0.5;
+          // Downscale for better performance over WebSocket
+          const scale = 0.4; 
           canvas.width = video.videoWidth * scale;
           canvas.height = video.videoHeight * scale;
-          ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
-          wsRef.current.send(dataUrl);
+          
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'low';
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Use lower quality for JPEG to reduce payload size
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+            
+            if (wsRef.current.readyState === WebSocket.OPEN) {
+              try {
+                wsRef.current.send(dataUrl);
+              } catch (e) {
+                console.error('Error sending JPEG frame:', e);
+              }
+            }
+          }
         }
-      }, 100); // 10 fps
+      }, 150); // ~6.6 fps
     } else {
       addLog('⚠️ Cannot start recording: stream or websocket not ready');
     }
@@ -208,7 +239,7 @@ export function useSecureRelayCall(
 
     ws.onerror = (e) => {
       console.error('WebSocket error:', e);
-      addLog(`❌ WebSocket error: ${JSON.stringify(e)}`);
+      addLog(`❌ WebSocket error (State: ${ws.readyState})`);
     };
 
     const isMediaSourceSupported = typeof window.MediaSource !== 'undefined';
@@ -313,7 +344,10 @@ export function useSecureRelayCall(
     console.log('Quality adjustment not supported in Relay mode yet');
   };
 
-  const joinRoom = (roomId: string) => {
+  const joinRoom = (roomId: string, remoteSupportsWebM?: boolean) => {
+    if (remoteSupportsWebM !== undefined) {
+      remoteSupportsWebMRef.current = remoteSupportsWebM;
+    }
     connectToRelay(roomId);
   };
 
