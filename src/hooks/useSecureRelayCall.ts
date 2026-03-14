@@ -216,6 +216,7 @@ export function useSecureRelayCall(
   };
 
   const playAudioChunk = async (chunk: ArrayBuffer) => {
+    addLog(`🎙️ playAudioChunk received ${chunk.byteLength} bytes`);
     // If we don't have a header, this might be it (first chunk)
     if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
       audioHeaderRef.current = new Uint8Array(chunk);
@@ -624,8 +625,15 @@ export function useSecureRelayCall(
 
     ws.onclose = (e) => {
       addLog(`🔌 WebSocket closed: ${e.code} ${e.reason}`);
-      cleanup();
-      onCallEnded();
+      
+      // Retry logic
+      if (retryCount < 3) {
+        addLog(`🔄 Retrying connection... (${retryCount + 1}/3)`);
+        setTimeout(() => connectToRelay(roomId, retryCount + 1), 2000);
+      } else {
+        cleanup();
+        onCallEnded();
+      }
     };
   };
 
@@ -658,11 +666,13 @@ export function useSecureRelayCall(
     setRemoteSupportsWebM,
     remoteJpeg,
     resumeAudio: async () => {
+      addLog('🎙️ resumeAudio called');
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         addLog('🎙️ AudioContext initialized via manual action');
       }
       const ctx = audioContextRef.current;
+      addLog(`🎙️ AudioContext state: ${ctx.state}`);
       if (ctx.state === 'suspended') {
         await ctx.resume();
         addLog('🎙️ AudioContext resumed via manual action');
