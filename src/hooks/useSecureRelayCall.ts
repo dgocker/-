@@ -77,6 +77,11 @@ export function useSecureRelayCall(
     }
     if (remoteVideoRef.current) {
       remoteVideoRef.current.style.display = 'block';
+      remoteVideoRef.current.style.opacity = '0.01';
+      remoteVideoRef.current.style.position = 'absolute';
+      remoteVideoRef.current.style.width = '1px';
+      remoteVideoRef.current.style.height = '1px';
+      remoteVideoRef.current.style.pointerEvents = 'none';
     }
     if (audioContextRef.current) {
       audioContextRef.current.close();
@@ -172,7 +177,7 @@ export function useSecureRelayCall(
       fullData.set(audioHeaderRef.current);
       fullData.set(new Uint8Array(chunk), audioHeaderRef.current.length);
 
-      // decodeAudioData is async and returns a promise in modern browsers
+      // decodeAudioData can fail on fragmented MP4, but we try anyway as last resort
       ctx.decodeAudioData(fullData.buffer, (buffer) => {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -187,8 +192,10 @@ export function useSecureRelayCall(
         }
       }, (err) => {
         // Silent fail for small chunks that can't be decoded
-        if (Date.now() - lastAudioLogTimeRef.current > 30000) {
-           addLog(`⚠️ Audio decoding failed for a chunk: ${err}`);
+        const now = Date.now();
+        if (now - lastAudioLogTimeRef.current > 30000) {
+          addLog(`⚠️ Audio decoding failed for a chunk: ${err}. Header size: ${audioHeaderRef.current?.length}`);
+          lastAudioLogTimeRef.current = now;
         }
       });
     } catch (e) {
@@ -347,9 +354,11 @@ export function useSecureRelayCall(
       let audioMimeType = 'audio/webm; codecs=opus';
       
       // If remote doesn't support WebM (likely iOS), we MUST use MP4/AAC for them to hear us
-      if (!remoteSupportsWebMRef.current && MediaRecorder.isTypeSupported('audio/mp4')) {
+      // Also force MP4 if WE are on iOS to improve our own recording stability
+      const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+      if ((!remoteSupportsWebMRef.current || isIOS) && MediaRecorder.isTypeSupported('audio/mp4')) {
         audioMimeType = 'audio/mp4';
-        addLog('🎙️ Remote is iOS/No-WebM, forcing audio/mp4 for compatibility');
+        addLog(`🎙️ iOS detected or remote lacks WebM, forcing audio/mp4 for compatibility: ${audioMimeType}`);
       } else {
         if (!MediaRecorder.isTypeSupported(audioMimeType)) {
           audioMimeType = 'audio/webm';
@@ -483,19 +492,27 @@ export function useSecureRelayCall(
         mediaSource.addEventListener('sourceopen', () => {
           addLog('ℹ️ MediaSource sourceopen event');
           try {
-            // If EITHER side doesn't support WebM, we are in JPEG+Audio mode
-            // So we should expect audio-only WebM chunks
-            let mimeType = 'video/webm; codecs="vp8, opus"';
             const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
+            let mimeType = 'video/webm; codecs="vp8, opus"';
             
             if (isFallbackMode) {
-              // Try different audio mime types for compatibility
-              const audioTypes = ['audio/webm; codecs=opus', 'audio/webm', 'audio/mp4'];
-              mimeType = audioTypes.find(t => MediaSourceClass.isTypeSupported(t)) || 'audio/webm';
+              // If we are in fallback mode, we are likely receiving MP4 from iOS or to iOS
+              // Check what the remote supports to guess what they are sending
+              if (!mySupportsWebMRef.current) {
+                mimeType = 'audio/mp4';
+              } else {
+                mimeType = 'audio/webm; codecs=opus';
+              }
               addLog(`🎙️ Initializing SourceBuffer for audio-only: ${mimeType}`);
             } else {
               if (!MediaSourceClass.isTypeSupported(mimeType)) mimeType = 'video/webm';
               addLog(`🎥 Initializing SourceBuffer for video+audio: ${mimeType}`);
+            }
+
+            if (!MediaSourceClass.isTypeSupported(mimeType)) {
+              addLog(`⚠️ MimeType ${mimeType} not supported by MediaSource, trying fallback...`);
+              if (mimeType.includes('webm')) mimeType = 'audio/webm';
+              else mimeType = 'audio/mp4';
             }
 
             const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
@@ -543,9 +560,12 @@ export function useSecureRelayCall(
             firstJpegReceivedRef.current = true;
             addLog('📸 Received first JPEG frame from remote');
           }
-          if (remoteVideoRef.current && remoteVideoRef.current.style.display !== 'none') {
-            remoteVideoRef.current.style.display = 'none';
-            addLog('ℹ️ Switched to JPEG fallback display');
+          if (remoteVideoRef.current && remoteVideoRef.current.style.opacity !== '0.01') {
+            remoteVideoRef.current.style.opacity = '0.01';
+            remoteVideoRef.current.style.position = 'absolute';
+            remoteVideoRef.current.style.width = '1px';
+            remoteVideoRef.current.style.height = '1px';
+            addLog('ℹ️ Switched to JPEG fallback display (keeping video for audio)');
           }
         }
       } else if (event.data instanceof ArrayBuffer) {
@@ -555,23 +575,14 @@ export function useSecureRelayCall(
         // If we are in fallback mode or the type is MP4, we might need special handling
         const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
         
-        if (!isMediaSourceFailed && !isFallbackMode && type === 0) {
+        if (!isMediaSourceFailed && sourceBufferRef.current) {
           queueRef.current.push(new Uint8Array(unpaddedData));
-          if (sourceBufferRef.current) {
-            processQueue();
-          }
+          processQueue();
         } else {
-          // Audio playback
+          // Audio playback fallback
           if (type === 0) {
-            // WebM audio chunk
-            if (!isMediaSourceFailed && sourceBufferRef.current) {
-               queueRef.current.push(new Uint8Array(unpaddedData));
-               processQueue();
-            } else {
-               playAudioChunk(unpaddedData);
-            }
+            playAudioChunk(unpaddedData);
           } else if (type === 1) {
-            // MP4 audio chunk
             if (audioChunkCountRef.current === 0) {
               addLog('🎙️ Receiving MP4 audio chunks (fallback)');
             }
