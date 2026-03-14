@@ -508,8 +508,9 @@ export default function Dashboard() {
       setActiveCallUserId(friendId);
       
       const roomId = `room-${Math.random().toString(36).substring(7)}`;
-      const supportsWebM = typeof window.MediaSource !== 'undefined' && 
-        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const canRecordWebM = typeof MediaRecorder !== 'undefined' && (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaRecorder.isTypeSupported('video/webm'));
+      const canPlayWebM = typeof window.MediaSource !== 'undefined' && (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const supportsWebM = canRecordWebM && canPlayWebM;
 
       addLog(`📡 Emitting call_user for room: ${roomId}, supportsWebM: ${supportsWebM}`);
       socket.emit('call_user', {
@@ -519,7 +520,7 @@ export default function Dashboard() {
         roomId,
         supportsWebM
       });
-      joinRoom(roomId);
+      joinRoom(roomId, supportsWebM);
 
       // Set timeout for connection (ACK) - 5 seconds
       if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
@@ -580,8 +581,9 @@ export default function Dashboard() {
       setActiveCallUserId(incomingCall.from);
       setActiveCallSocketId(incomingCall.fromSocketId);
       
-      const supportsWebM = typeof window.MediaSource !== 'undefined' && 
-        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const canRecordWebM = typeof MediaRecorder !== 'undefined' && (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaRecorder.isTypeSupported('video/webm'));
+      const canPlayWebM = typeof window.MediaSource !== 'undefined' && (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const supportsWebM = canRecordWebM && canPlayWebM;
 
       addLog(`📡 Emitting answer_call, supportsWebM: ${supportsWebM}`);
       socket.emit('answer_call', {
@@ -589,7 +591,7 @@ export default function Dashboard() {
         supportsWebM
       });
       if (incomingCall.roomId) {
-        joinRoom(incomingCall.roomId);
+        joinRoom(incomingCall.roomId, supportsWebM);
       }
       setIncomingCall(null);
     } catch (err) {

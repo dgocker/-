@@ -21,6 +21,8 @@ export function useSecureRelayCall(
   const isAppendingRef = useRef(false);
   const currentRoomIdRef = useRef<string | null>(null);
   const remoteSupportsWebMRef = useRef<boolean>(true); // Assume true until told otherwise
+  const mySupportsWebMRef = useRef<boolean>(false);
+  const audioRecorderRef = useRef<MediaRecorder | null>(null);
   
   // Fallback refs
   const fallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,7 +37,10 @@ export function useSecureRelayCall(
       wsRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      try { mediaRecorderRef.current.stop(); } catch (e) {}
+    }
+    if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
+      try { audioRecorderRef.current.stop(); } catch (e) {}
     }
     if (fallbackIntervalRef.current) {
       window.clearInterval(fallbackIntervalRef.current);
@@ -102,11 +107,10 @@ export function useSecureRelayCall(
     
     // Stop any existing recording or fallback
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {
-        console.error('Error stopping MediaRecorder:', e);
-      }
+      try { mediaRecorderRef.current.stop(); } catch (e) {}
+    }
+    if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
+      try { audioRecorderRef.current.stop(); } catch (e) {}
     }
     if (fallbackIntervalRef.current) {
       window.clearInterval(fallbackIntervalRef.current);
@@ -116,19 +120,19 @@ export function useSecureRelayCall(
     if (activeStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
       const isMediaRecorderSupported = typeof MediaRecorder !== 'undefined';
       let mimeType = 'video/webm; codecs="vp8, opus"';
-      let canUseMediaRecorder = false;
+      let canUseFullWebM = false;
 
-      // Check if we can use MediaRecorder for high-quality streaming
-      if (isMediaRecorderSupported && remoteSupportsWebMRef.current) {
+      // We can only use full WebM if BOTH sides support it
+      if (isMediaRecorderSupported && remoteSupportsWebMRef.current && mySupportsWebMRef.current) {
         if (MediaRecorder.isTypeSupported(mimeType)) {
-          canUseMediaRecorder = true;
+          canUseFullWebM = true;
         } else if (MediaRecorder.isTypeSupported('video/webm')) {
           mimeType = 'video/webm';
-          canUseMediaRecorder = true;
+          canUseFullWebM = true;
         }
       }
 
-      if (canUseMediaRecorder) {
+      if (canUseFullWebM) {
         try {
           addLog(`✅ Using MediaRecorder with mimeType: ${mimeType}`);
           const recorder = new MediaRecorder(activeStreamRef.current, { 
@@ -155,59 +159,95 @@ export function useSecureRelayCall(
           addLog(`⚠️ MediaRecorder failed: ${e}. Falling back to JPEG.`);
         }
       } else {
-        addLog('⚠️ MediaRecorder not supported or remote doesn\'t support WebM. Using JPEG fallback.');
+        addLog('⚠️ Using JPEG + Audio fallback (WebM not supported by both sides).');
       }
 
-      // Fallback to JPEG frames (Motion JPEG)
-      if (!fallbackCanvasRef.current) {
-        fallbackCanvasRef.current = document.createElement('canvas');
-      }
-      if (!fallbackVideoRef.current) {
-        fallbackVideoRef.current = document.createElement('video');
-        fallbackVideoRef.current.muted = true;
-        fallbackVideoRef.current.playsInline = true;
-      }
-      
-      const canvas = fallbackCanvasRef.current;
-      const ctx = canvas.getContext('2d', { alpha: false });
-      const video = fallbackVideoRef.current;
-      
-      if (video.srcObject !== activeStreamRef.current) {
-        video.srcObject = activeStreamRef.current;
-        video.play().catch(e => {
-          console.error('Fallback video play error', e);
-          addLog(`❌ Fallback video play error: ${e}`);
-        });
-      }
+      // Fallback to JPEG frames (Motion JPEG) + Audio-only WebM
+      startFallbackRecording();
+    } else {
+      addLog('⚠️ Cannot start recording: stream or websocket not ready');
+    }
+  };
 
-      // Lower frequency and quality for stability
-      fallbackIntervalRef.current = window.setInterval(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN && video.videoWidth > 0) {
-          // Downscale for better performance over WebSocket
-          const scale = 0.4; 
-          canvas.width = video.videoWidth * scale;
-          canvas.height = video.videoHeight * scale;
+  const startFallbackRecording = () => {
+    if (!activeStreamRef.current) return;
+
+    // 1. Video Fallback (JPEG)
+    if (!fallbackCanvasRef.current) {
+      fallbackCanvasRef.current = document.createElement('canvas');
+    }
+    if (!fallbackVideoRef.current) {
+      fallbackVideoRef.current = document.createElement('video');
+      fallbackVideoRef.current.muted = true;
+      fallbackVideoRef.current.playsInline = true;
+    }
+    
+    const canvas = fallbackCanvasRef.current;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const video = fallbackVideoRef.current;
+    
+    if (video.srcObject !== activeStreamRef.current) {
+      video.srcObject = activeStreamRef.current;
+      video.play().catch(e => {
+        console.error('Fallback video play error', e);
+        addLog(`❌ Fallback video play error: ${e}`);
+      });
+    }
+
+    // Lower frequency and quality for stability
+    fallbackIntervalRef.current = window.setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN && video.videoWidth > 0) {
+        // Downscale for better performance over WebSocket
+        const scale = 0.4; 
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'low';
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           
-          if (ctx) {
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'low';
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Use lower quality for JPEG to reduce payload size
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
-            
-            if (wsRef.current.readyState === WebSocket.OPEN) {
-              try {
-                wsRef.current.send(dataUrl);
-              } catch (e) {
-                console.error('Error sending JPEG frame:', e);
-              }
+          // Use lower quality for JPEG to reduce payload size
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+          
+          if (wsRef.current.readyState === WebSocket.OPEN) {
+            try {
+              wsRef.current.send(dataUrl);
+            } catch (e) {
+              console.error('Error sending JPEG frame:', e);
             }
           }
         }
-      }, 150); // ~6.6 fps
-    } else {
-      addLog('⚠️ Cannot start recording: stream or websocket not ready');
+      }
+    }, 150); // ~6.6 fps
+
+    // 2. Audio Fallback (Audio-only WebM)
+    try {
+      let audioMimeType = 'audio/webm; codecs=opus';
+      if (!MediaRecorder.isTypeSupported(audioMimeType)) {
+        audioMimeType = 'audio/webm';
+      }
+      if (!MediaRecorder.isTypeSupported(audioMimeType)) {
+        audioMimeType = 'audio/mp4'; // iOS fallback
+      }
+
+      addLog(`🎙️ Starting audio recording with mimeType: ${audioMimeType}`);
+      const audioStream = new MediaStream(activeStreamRef.current.getAudioTracks());
+      const audioRecorder = new MediaRecorder(audioStream, { mimeType: audioMimeType });
+      audioRecorderRef.current = audioRecorder;
+      audioRecorder.ondataavailable = async (event) => {
+        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+          try {
+            const buffer = await event.data.arrayBuffer();
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(addPadding(buffer));
+            }
+          } catch (e) {}
+        }
+      };
+      audioRecorder.start(200);
+    } catch (e) {
+      addLog(`❌ Audio recording failed: ${e}`);
     }
   };
 
@@ -269,14 +309,20 @@ export function useSecureRelayCall(
         mediaSource.addEventListener('sourceopen', () => {
           addLog('ℹ️ MediaSource sourceopen event');
           try {
+            // If EITHER side doesn't support WebM, we are in JPEG+Audio mode
+            // So we should expect audio-only WebM chunks
             let mimeType = 'video/webm; codecs="vp8, opus"';
-            if (!MediaSource.isTypeSupported(mimeType)) {
-              mimeType = 'video/webm';
-              addLog('⚠️ video/webm; codecs="vp8, opus" not supported, falling back to video/webm');
+            if (!remoteSupportsWebMRef.current || !mySupportsWebMRef.current) {
+              mimeType = 'audio/webm; codecs=opus';
+              if (!MediaSource.isTypeSupported(mimeType)) mimeType = 'audio/webm';
+              addLog(`🎙️ Initializing SourceBuffer for audio-only: ${mimeType}`);
+            } else {
+              if (!MediaSource.isTypeSupported(mimeType)) mimeType = 'video/webm';
+              addLog(`🎥 Initializing SourceBuffer for video+audio: ${mimeType}`);
             }
+
             const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
             sourceBufferRef.current = sourceBuffer;
-            addLog(`✅ SourceBuffer created with mimeType: ${mimeType}`);
             
             sourceBuffer.addEventListener('updateend', () => {
               isAppendingRef.current = false;
@@ -286,10 +332,8 @@ export function useSecureRelayCall(
             // Process any queued chunks that arrived before sourceopen
             processQueue();
           } catch (e) {
-            console.error('SourceBuffer error', e);
             addLog(`❌ SourceBuffer error: ${e}`);
             isMediaSourceFailed = true;
-            queueRef.current = []; // Clear queue to avoid memory leak
           }
         });
       } catch (e) {
@@ -344,9 +388,9 @@ export function useSecureRelayCall(
     console.log('Quality adjustment not supported in Relay mode yet');
   };
 
-  const joinRoom = (roomId: string, remoteSupportsWebM?: boolean) => {
-    if (remoteSupportsWebM !== undefined) {
-      remoteSupportsWebMRef.current = remoteSupportsWebM;
+  const joinRoom = (roomId: string, supportsWebM?: boolean) => {
+    if (supportsWebM !== undefined) {
+      mySupportsWebMRef.current = supportsWebM;
     }
     connectToRelay(roomId);
   };
