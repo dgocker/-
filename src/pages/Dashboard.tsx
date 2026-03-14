@@ -130,7 +130,7 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -169,11 +169,16 @@ export default function Dashboard() {
     playVideo();
   }, [localStream]);
 
-  const handleManualPlay = () => {
+  const handleManualPlay = async () => {
     if (remoteVideoRef.current) {
-      remoteVideoRef.current.play()
-        .then(() => setAutoplayFailed(false))
-        .catch(console.error);
+      try {
+        await resumeAudio();
+        setAutoplayFailed(false);
+        addLog('✅ Manual play/resume successful');
+      } catch (e) {
+        console.error('Manual play failed', e);
+        addLog(`❌ Manual play failed: ${e}`);
+      }
     }
   };
 
@@ -913,11 +918,24 @@ export default function Dashboard() {
                 className="w-full h-full object-cover"
               />
               {autoplayFailed && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-30">
-                  <div className="bg-emerald-500 text-white px-6 py-3 rounded-full font-medium flex items-center gap-2 animate-pulse cursor-pointer shadow-xl">
-                    <Video size={20} />
-                    Нажмите, чтобы включить видео
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-30 p-6 text-center">
+                  <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4 animate-pulse">
+                    <Mic size={32} className="text-emerald-400" />
                   </div>
+                  <h3 className="text-lg font-bold text-white mb-2">Звук заблокирован</h3>
+                  <p className="text-zinc-400 text-xs mb-6 max-w-[240px]">
+                    Нажмите кнопку ниже, чтобы включить звук и видео
+                  </p>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleManualPlay();
+                    }}
+                    className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-3 rounded-full font-bold flex items-center gap-2 shadow-xl shadow-emerald-500/20 transition-all transform hover:scale-105 active:scale-95"
+                  >
+                    <Video size={20} />
+                    Включить связь
+                  </button>
                 </div>
               )}
               {!remoteStream && (
