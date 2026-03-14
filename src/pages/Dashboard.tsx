@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
 import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh } from 'lucide-react';
-import { useWebRTC } from '../hooks/useWebRTC';
+import { useSecureRelayCall } from '../hooks/useSecureRelayCall';
 
 export default function Dashboard() {
   const { user, token, logout, onlineFriends, setOnlineFriends, addOnlineFriend, removeOnlineFriend } = useStore();
@@ -120,7 +120,7 @@ export default function Dashboard() {
     }, 300);
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis } = useWebRTC(socket, activeStreamRef, setRemoteStream, handleCallEnded);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -131,76 +131,14 @@ export default function Dashboard() {
     if (connectionState === 'connected' && remoteVideoRef.current && remoteStream) {
       console.log('🔄 Connection restored/stable, ensuring remote video is playing');
       const video = remoteVideoRef.current;
-      if (video.srcObject !== remoteStream) {
-        video.srcObject = remoteStream;
-      }
+      // We no longer set srcObject here because useSecureRelayCall handles MediaSource
       if (video.paused) {
         video.play().catch(e => console.error('Auto-recovery play failed:', e));
       }
     }
   }, [connectionState, remoteStream]);
 
-  // Video Watchdog: Detects if video is frozen while audio/connection is fine
-  useEffect(() => {
-    if (!remoteStream || !remoteVideoRef.current || connectionState !== 'connected') return;
-
-    let lastTime = 0;
-    let lastFrames = 0;
-    let stuckCount = 0;
-    const video = remoteVideoRef.current;
-
-    const interval = setInterval(() => {
-      // If video is paused intentionally or stream is inactive, do nothing
-      if (video.paused || !remoteStream.active) return;
-
-      const currentTime = video.currentTime;
-      
-      // Get frame count if supported (detects video-only freeze)
-      let currentFrames = 0;
-      if ('getVideoPlaybackQuality' in video) {
-        currentFrames = video.getVideoPlaybackQuality().totalVideoFrames;
-      }
-
-      // Check if we expect video to be moving (track exists, enabled, not muted)
-      const hasActiveVideo = remoteStream.getVideoTracks().some(t => t.enabled && !t.muted && t.readyState === 'live');
-
-      // Condition 1: Time is stuck (Total freeze)
-      const isTimeStuck = currentTime > 0 && currentTime === lastTime;
-      
-      // Condition 2: Frames are stuck (Video freeze, Audio might be playing)
-      // Only check if we actually have active video and have received at least some frames previously
-      const isVideoStuck = hasActiveVideo && currentFrames > 0 && currentFrames === lastFrames;
-
-      if (isTimeStuck || isVideoStuck) {
-        stuckCount++;
-        // If stuck for 4 seconds (4 checks)
-        if (stuckCount > 4) {
-          console.warn(`⚠️ Video Watchdog: Freeze detected (TimeStuck: ${isTimeStuck}, VideoStuck: ${isVideoStuck}), forcing restart...`);
-          
-          // Force restart video element
-          video.pause();
-          video.srcObject = null;
-          
-          setTimeout(() => {
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.srcObject = remoteStream;
-              remoteVideoRef.current.play()
-                .then(() => console.log('✅ Video Watchdog: Restarted successfully'))
-                .catch(e => console.error('❌ Video Watchdog: Restart failed', e));
-            }
-          }, 100);
-          
-          stuckCount = 0;
-        }
-      } else {
-        stuckCount = 0;
-        lastTime = currentTime;
-        lastFrames = currentFrames;
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [remoteStream, connectionState]);
+  // Video Watchdog removed for MediaSource compatibility
 
   useEffect(() => {
     const video = localVideoRef.current;
@@ -227,7 +165,8 @@ export default function Dashboard() {
     const video = remoteVideoRef.current;
     if (!video || !remoteStream) return;
 
-    video.srcObject = remoteStream;
+    // We no longer set srcObject here because useSecureRelayCall handles MediaSource
+    // video.srcObject = remoteStream;
 
     const playVideo = async () => {
       try {
@@ -551,11 +490,14 @@ export default function Dashboard() {
       setAutoplayFailed(false);
       setActiveCallUserId(friendId);
       
+      const roomId = `room-${Math.random().toString(36).substring(7)}`;
       socket.emit('call_user', {
         userToCall: friendId,
         from: user?.id,
-        name: user?.first_name
+        name: user?.first_name,
+        roomId
       });
+      joinRoom(roomId);
 
       // Set timeout for connection (ACK) - 5 seconds
       if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
@@ -603,6 +545,9 @@ export default function Dashboard() {
       socket.emit('answer_call', {
         toSocketId: incomingCall.fromSocketId
       });
+      if (incomingCall.roomId) {
+        joinRoom(incomingCall.roomId);
+      }
       setIncomingCall(null);
     } catch (err) {
       console.error('Failed to get media devices', err);
@@ -680,18 +625,8 @@ export default function Dashboard() {
       setFacingMode(newFacingMode);
       
       // Replace track in peer connection if active
-      if (peerConnection?.current) {
-        const videoTrack = newStream.getVideoTracks()[0];
-        const videoSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
-        if (videoSender && videoTrack) {
-          videoSender.replaceTrack(videoTrack).catch(e => console.error('Error replacing video track', e));
-        }
-
-        const audioTrack = newStream.getAudioTracks()[0];
-        const audioSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'audio');
-        if (audioSender && audioTrack) {
-          audioSender.replaceTrack(audioTrack).catch(e => console.error('Error replacing audio track', e));
-        }
+      if (activeStreamRef.current) {
+        startRecording();
       }
       
       // Apply current mute states to new stream
