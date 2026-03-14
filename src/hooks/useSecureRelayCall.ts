@@ -199,9 +199,11 @@ export function useSecureRelayCall(
         audioBufferRef.current = mediaSrc.addSourceBuffer(AUDIO_MIME);
         audioBufferRef.current.mode = 'segments';
 
+        // Если заголовок пришел до открытия, добавляем его сейчас
         if (audioInitHeaderRef.current) {
           audioBufferRef.current.appendBuffer(audioInitHeaderRef.current);
-          addLog(`🎙️ Init header appended immediately (${audioInitHeaderRef.current.byteLength} bytes)`);
+          addLog(`🎙️ Init header appended in sourceopen (${audioInitHeaderRef.current.byteLength} bytes)`);
+          audioInitHeaderRef.current = null; // Очищаем, так как добавили
         }
 
         audioBufferRef.current.addEventListener('updateend', drainAudioQueue);
