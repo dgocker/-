@@ -31,6 +31,18 @@ export function useSecureRelayCall(
   const remoteImgRef = useRef<HTMLImageElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioHeaderRef = useRef<Uint8Array | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
+  const lastAudioLogTimeRef = useRef<number>(0);
+  const audioChunkCountRef = useRef<number>(0);
+
+  const startPing = (ws: WebSocket) => {
+    if (pingIntervalRef.current) window.clearInterval(pingIntervalRef.current);
+    pingIntervalRef.current = window.setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+      }
+    }, 5000);
+  };
 
   const cleanup = useCallback(() => {
     addLog('🧹 Cleaning up call resources...');
@@ -62,6 +74,10 @@ export function useSecureRelayCall(
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    if (pingIntervalRef.current) {
+      window.clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
     setConnectionState('disconnected');
     queueRef.current = [];
     currentRoomIdRef.current = null;
@@ -72,17 +88,20 @@ export function useSecureRelayCall(
     }
   }, [remoteVideoRef, addLog]);
 
-  const addPadding = (originalBuffer: ArrayBuffer) => {
+  const addPadding = (originalBuffer: ArrayBuffer, type: number = 0) => {
     const originalView = new Uint8Array(originalBuffer);
     const originalSize = originalView.length;
     const paddingSize = Math.floor(Math.random() * 4500) + 500; 
-    const totalSize = 4 + originalSize + paddingSize;
+    const totalSize = 5 + originalSize + paddingSize; // 1 byte for type + 4 bytes for size
     const paddedBuffer = new ArrayBuffer(totalSize);
     const paddedView = new DataView(paddedBuffer);
     const paddedUint8 = new Uint8Array(paddedBuffer);
-    paddedView.setUint32(0, originalSize, true);
-    paddedUint8.set(originalView, 4);
-    for (let i = 4 + originalSize; i < totalSize; i++) {
+    
+    paddedUint8[0] = type; // 0 = WebM, 1 = MP4
+    paddedView.setUint32(1, originalSize, true);
+    paddedUint8.set(originalView, 5);
+    
+    for (let i = 5 + originalSize; i < totalSize; i++) {
       paddedUint8[i] = Math.floor(Math.random() * 256);
     }
     return paddedBuffer;
@@ -90,12 +109,21 @@ export function useSecureRelayCall(
 
   const removePadding = (paddedBuffer: ArrayBuffer) => {
     const paddedView = new DataView(paddedBuffer);
-    const originalSize = paddedView.getUint32(0, true);
-    return paddedBuffer.slice(4, 4 + originalSize);
+    const type = new Uint8Array(paddedBuffer)[0];
+    const originalSize = paddedView.getUint32(1, true);
+    return { 
+      data: paddedBuffer.slice(5, 5 + originalSize),
+      type
+    };
   };
 
   const processQueue = () => {
     if (!sourceBufferRef.current || isAppendingRef.current || queueRef.current.length === 0) return;
+    
+    if (queueRef.current.length > 30) {
+      addLog(`⚠️ Queue getting large: ${queueRef.current.length} chunks`);
+    }
+
     try {
       if (!sourceBufferRef.current.updating) {
         isAppendingRef.current = true;
@@ -120,8 +148,10 @@ export function useSecureRelayCall(
       }
 
       // If we don't have a header, this might be it (first chunk)
-      if (!audioHeaderRef.current) {
+      // WebM headers are usually > 100 bytes, MP4 headers can be larger
+      if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
         audioHeaderRef.current = new Uint8Array(chunk);
+        addLog(`🎙️ Saved audio header (${chunk.byteLength} bytes)`);
         return;
       }
 
@@ -130,11 +160,25 @@ export function useSecureRelayCall(
       fullData.set(audioHeaderRef.current);
       fullData.set(new Uint8Array(chunk), audioHeaderRef.current.length);
 
-      const audioBuffer = await ctx.decodeAudioData(fullData.buffer);
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      source.start(0);
+      // decodeAudioData is async and returns a promise in modern browsers
+      ctx.decodeAudioData(fullData.buffer, (buffer) => {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+        
+        audioChunkCountRef.current++;
+        const now = Date.now();
+        if (now - lastAudioLogTimeRef.current > 10000) { // Log every 10 seconds
+          addLog(`🔊 Audio playback active: ${audioChunkCountRef.current} chunks decoded`);
+          lastAudioLogTimeRef.current = now;
+        }
+      }, (err) => {
+        // Silent fail for small chunks that can't be decoded
+        if (Date.now() - lastAudioLogTimeRef.current > 30000) {
+           addLog(`⚠️ Audio decoding failed for a chunk: ${err}`);
+        }
+      });
     } catch (e) {
       // decodeAudioData often fails on partial chunks, this is expected
     }
@@ -172,18 +216,23 @@ export function useSecureRelayCall(
 
       if (canUseFullWebM) {
         try {
-          addLog(`✅ Using MediaRecorder with mimeType: ${mimeType}`);
+          addLog(`🎥 Starting full WebM recording: ${mimeType}`);
           const recorder = new MediaRecorder(activeStreamRef.current, { 
             mimeType,
-            videoBitsPerSecond: 250000 // 250kbps for stability
+            videoBitsPerSecond: 250000, // 250kbps for stability
+            audioBitsPerSecond: 64000
           });
           mediaRecorderRef.current = recorder;
+          
+          recorder.onstart = () => addLog('🎥 MediaRecorder started');
+          recorder.onerror = (e) => addLog(`❌ MediaRecorder error: ${(e as any).error?.message || e.type}`);
+          
           recorder.ondataavailable = async (event) => {
             if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
               try {
                 const buffer = await event.data.arrayBuffer();
                 if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(addPadding(buffer));
+                  wsRef.current.send(addPadding(buffer, 0)); // 0 = WebM
                 }
               } catch (e) {
                 console.error('Error sending media chunk:', e);
@@ -284,12 +333,18 @@ export function useSecureRelayCall(
         audioBitsPerSecond: 32000 // Low bitrate for stability
       });
       audioRecorderRef.current = audioRecorder;
+      
+      audioRecorder.onstart = () => addLog('🎙️ Audio fallback recorder started');
+      audioRecorder.onerror = (e) => addLog(`❌ Audio recorder error: ${(e as any).error?.message || e.type}`);
+      
+      const typeByte = audioMimeType.includes('mp4') ? 1 : 0;
+      
       audioRecorder.ondataavailable = async (event) => {
         if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
           try {
             const buffer = await event.data.arrayBuffer();
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(addPadding(buffer));
+              wsRef.current.send(addPadding(buffer, typeByte));
             }
           } catch (e) {}
         }
@@ -355,6 +410,7 @@ export function useSecureRelayCall(
       setConnectionState('connected');
       setRemoteStream(new MediaStream()); // Trick Dashboard into thinking we have a stream
       startRecording();
+      startPing(ws);
     };
 
     ws.onerror = (e) => {
@@ -365,12 +421,16 @@ export function useSecureRelayCall(
     const isMediaSourceSupported = typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined';
     let isMediaSourceFailed = false;
     
-    addLog(`ℹ️ MediaSource supported: ${isMediaSourceSupported}`);
+    addLog(`ℹ️ MediaSource support: ${isMediaSourceSupported ? (window.MediaSource ? 'Standard' : 'Managed') : 'None'}`);
     
     if (isMediaSourceSupported) {
       try {
         const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
         const mediaSource = new MediaSourceClass();
+        
+        mediaSource.addEventListener('sourceclose', () => addLog('ℹ️ MediaSource closed'));
+        mediaSource.addEventListener('sourceended', () => addLog('ℹ️ MediaSource ended'));
+
         if (remoteVideoRef.current) {
           remoteVideoRef.current.src = URL.createObjectURL(mediaSource);
           remoteVideoRef.current.play()
@@ -407,7 +467,11 @@ export function useSecureRelayCall(
 
             const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
             sourceBufferRef.current = sourceBuffer;
+            addLog(`✅ SourceBuffer created (${mimeType})`);
             
+            sourceBuffer.addEventListener('error', (e) => addLog(`❌ SourceBuffer error event: ${e}`));
+            sourceBuffer.addEventListener('abort', () => addLog('⚠️ SourceBuffer abort event'));
+
             sourceBuffer.addEventListener('updateend', () => {
               isAppendingRef.current = false;
               processQueue();
@@ -430,35 +494,63 @@ export function useSecureRelayCall(
     }
 
     ws.onmessage = (event) => {
-      if (typeof event.data === 'string' && event.data.startsWith('data:image/jpeg')) {
-        // Handle JPEG fallback frame
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.style.display = 'none'; // Hide video element
-          
-          if (!remoteImgRef.current) {
-            remoteImgRef.current = document.createElement('img');
-            remoteImgRef.current.className = remoteVideoRef.current.className;
-            remoteImgRef.current.style.display = 'block';
-            remoteImgRef.current.style.width = '100%';
-            remoteImgRef.current.style.height = '100%';
-            remoteImgRef.current.style.objectFit = 'cover';
-            remoteVideoRef.current.parentElement?.appendChild(remoteImgRef.current);
-            addLog('ℹ️ Switched to JPEG fallback display');
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'pong') {
+            const rtt = Date.now() - msg.ts;
+            setStats(prev => ({ ...prev, rtt }));
+            return;
           }
-          remoteImgRef.current.src = event.data;
+        } catch (e) {}
+
+        if (event.data.startsWith('data:image/jpeg')) {
+          // Handle JPEG fallback frame
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.style.display = 'none'; // Hide video element
+            
+            if (!remoteImgRef.current) {
+              remoteImgRef.current = document.createElement('img');
+              remoteImgRef.current.className = remoteVideoRef.current.className;
+              remoteImgRef.current.style.display = 'block';
+              remoteImgRef.current.style.width = '100%';
+              remoteImgRef.current.style.height = '100%';
+              remoteImgRef.current.style.objectFit = 'cover';
+              remoteVideoRef.current.parentElement?.appendChild(remoteImgRef.current);
+              addLog('ℹ️ Switched to JPEG fallback display');
+            }
+            remoteImgRef.current.src = event.data;
+          }
         }
       } else if (event.data instanceof ArrayBuffer) {
-        // Handle WebM padded buffer
-        const unpaddedData = removePadding(event.data);
+        // Handle padded buffer
+        const { data: unpaddedData, type } = removePadding(event.data);
         
-        if (!isMediaSourceFailed) {
+        // If we are in fallback mode or the type is MP4, we might need special handling
+        const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
+        
+        if (!isMediaSourceFailed && !isFallbackMode && type === 0) {
           queueRef.current.push(new Uint8Array(unpaddedData));
           if (sourceBufferRef.current) {
             processQueue();
           }
         } else {
-          // Fallback audio playback for devices without MSE
-          playAudioChunk(unpaddedData);
+          // Audio playback
+          if (type === 0) {
+            // WebM audio chunk
+            if (!isMediaSourceFailed && sourceBufferRef.current) {
+               queueRef.current.push(new Uint8Array(unpaddedData));
+               processQueue();
+            } else {
+               playAudioChunk(unpaddedData);
+            }
+          } else if (type === 1) {
+            // MP4 audio chunk
+            if (audioChunkCountRef.current === 0) {
+              addLog('🎙️ Receiving MP4 audio chunks (fallback)');
+            }
+            playAudioChunk(unpaddedData);
+          }
         }
       }
     };

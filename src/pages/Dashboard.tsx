@@ -219,6 +219,7 @@ export default function Dashboard() {
     .catch(err => console.error('Failed to fetch friends', err));
 
     // Socket setup
+    addLog(`📱 User Agent: ${navigator.userAgent}`);
     addLog('🔌 Initializing Socket.io...');
     const newSocket = io({
       auth: { token },
@@ -380,7 +381,7 @@ export default function Dashboard() {
 
     newSocket.on('call_accepted', ({ from, fromSocketId, supportsWebM }) => {
       console.log('Call accepted by', from);
-      addLog(`✅ Call accepted by ${from}`);
+      addLog(`✅ Call accepted by ${from}. Remote supports WebM: ${supportsWebM}`);
       if (dialingTimeoutRef.current) {
         clearTimeout(dialingTimeoutRef.current);
         dialingTimeoutRef.current = null;
@@ -507,14 +508,26 @@ export default function Dashboard() {
         });
       }
       addLog('✅ Media stream acquired');
+      stream.getTracks().forEach(track => {
+        const settings = track.getSettings();
+        addLog(`  - ${track.kind}: ${track.label} (${settings.width || 'N/A'}x${settings.height || 'N/A'} @ ${settings.frameRate || 'N/A'}fps)`);
+      });
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
       setActiveCallUserId(friendId);
       
       const roomId = `room-${Math.random().toString(36).substring(7)}`;
-      const canRecordWebM = typeof MediaRecorder !== 'undefined' && (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaRecorder.isTypeSupported('video/webm'));
-      const canPlayWebM = typeof window.MediaSource !== 'undefined' && (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const canRecordWebM = typeof MediaRecorder !== 'undefined' && 
+        (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+         MediaRecorder.isTypeSupported('video/webm; codecs=vp8') || 
+         MediaRecorder.isTypeSupported('video/webm'));
+      
+      const canPlayWebM = typeof window.MediaSource !== 'undefined' && 
+        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+         MediaSource.isTypeSupported('video/webm; codecs=vp8') || 
+         MediaSource.isTypeSupported('video/webm'));
+      
       const supportsWebM = canRecordWebM && canPlayWebM;
 
       addLog(`📡 Emitting call_user for room: ${roomId}, supportsWebM: ${supportsWebM}`);
@@ -580,14 +593,26 @@ export default function Dashboard() {
         });
       }
       addLog('✅ Media stream acquired');
+      stream.getTracks().forEach(track => {
+        const settings = track.getSettings();
+        addLog(`  - ${track.kind}: ${track.label} (${settings.width || 'N/A'}x${settings.height || 'N/A'} @ ${settings.frameRate || 'N/A'}fps)`);
+      });
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
       setActiveCallUserId(incomingCall.from);
       setActiveCallSocketId(incomingCall.fromSocketId);
       
-      const canRecordWebM = typeof MediaRecorder !== 'undefined' && (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaRecorder.isTypeSupported('video/webm'));
-      const canPlayWebM = typeof window.MediaSource !== 'undefined' && (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+      const canRecordWebM = typeof MediaRecorder !== 'undefined' && 
+        (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+         MediaRecorder.isTypeSupported('video/webm; codecs=vp8') || 
+         MediaRecorder.isTypeSupported('video/webm'));
+      
+      const canPlayWebM = typeof window.MediaSource !== 'undefined' && 
+        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+         MediaSource.isTypeSupported('video/webm; codecs=vp8') || 
+         MediaSource.isTypeSupported('video/webm'));
+      
       const supportsWebM = canRecordWebM && canPlayWebM;
 
       addLog(`📡 Emitting answer_call, supportsWebM: ${supportsWebM}`);

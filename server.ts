@@ -7,6 +7,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import jwt from 'jsonwebtoken';
+import https from 'https';
 import { db, initDb } from './src/server/db.js';
 import { setupSocket } from './src/server/socket.js';
 import authRoutes from './src/server/routes/auth.js';
@@ -140,6 +141,27 @@ async function startServer() {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    
+    // Notify Admin via Telegram (standard for "bots" and free)
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.ADMIN_TELEGRAM_ID;
+    
+    if (botToken && chatId) {
+      const message = encodeURIComponent(`🚀 Secure Relay Server Started!\n📍 URL: ${process.env.APP_URL || 'Local'}\n⏰ Time: ${new Date().toLocaleString()}`);
+      const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${message}`;
+      
+      https.get(url, (res) => {
+        if (res.statusCode === 200) {
+          console.log('✅ Admin notified via Telegram');
+        } else {
+          console.error('❌ Failed to notify admin via Telegram');
+        }
+      }).on('error', (e) => {
+        console.error('❌ Telegram notification error:', e);
+      });
+    } else {
+      console.log('ℹ️ Admin notification skipped (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing)');
+    }
   });
 }
 
