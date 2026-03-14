@@ -171,16 +171,20 @@ export function useSecureRelayCall(
         addLog(`🎙️ Appending chunk (${nextChunk.byteLength} bytes)`);
       }
     }
+    // Форсируем play, если Safari «уснул»
+    if (audioPlayerRef.current && audioPlayerRef.current.paused) {
+      audioPlayerRef.current.play().catch(e => addLog(`🎙️ Play error: ${e}`));
+    }
   };
 
   const initAudioPlayer = () => {
     if (audioPlayerRef.current) return;
 
-    audioPlayerRef.current = document.createElement('audio');
+    audioPlayerRef.current = document.createElement('video'); // ← КЛЮЧЕВОЙ ХАК
     audioPlayerRef.current.style.display = 'none';
-    audioPlayerRef.current.autoplay = true;
-    audioPlayerRef.current.playsInline = true;
+    audioPlayerRef.current.muted = false;
     audioPlayerRef.current.volume = 1.0;
+    audioPlayerRef.current.playsInline = true;
     document.body.appendChild(audioPlayerRef.current);
 
     const MSClass = (window as any).ManagedMediaSource || window.MediaSource;
@@ -212,7 +216,10 @@ export function useSecureRelayCall(
       }
     });
 
-    audioPlayerRef.current.play().catch(err => addLog(`🎙️ Autoplay prevented: ${err}`));
+    // Форсируем запуск воспроизведения
+    setTimeout(() => {
+      audioPlayerRef.current?.play().catch(err => addLog(`🎙️ Autoplay: ${err}`));
+    }, 100);
     addLog('🎙️ Audio player initialized');
   };
 
