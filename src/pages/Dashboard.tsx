@@ -14,11 +14,20 @@ export default function Dashboard() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  
+  const addLog = useCallback((msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs(prev => [...prev, `[${timestamp}] ${msg}`]);
+    console.log(`[LOG] ${msg}`);
+  }, []);
   
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
+    addLog(`Toast: ${msg}`);
     setTimeout(() => setToastMessage(null), 3000);
-  }, []);
+  }, [addLog]);
   
   // Call state
   const [incomingCall, setIncomingCall] = useState<any>(null);
@@ -121,7 +130,7 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -205,6 +214,7 @@ export default function Dashboard() {
     .catch(err => console.error('Failed to fetch friends', err));
 
     // Socket setup
+    addLog('🔌 Initializing Socket.io...');
     const newSocket = io({
       auth: { token },
       reconnectionAttempts: Infinity, // Keep trying to reconnect
@@ -214,6 +224,7 @@ export default function Dashboard() {
 
     newSocket.on('connect_error', (err) => {
       console.error('Socket connection error:', err.message);
+      addLog(`❌ Socket connection error: ${err.message}`);
       if (err.message === 'Authentication error') {
         logout();
         navigate('/login');
@@ -223,6 +234,7 @@ export default function Dashboard() {
     // Handle reconnection
     newSocket.on('connect', () => {
       console.log('Socket connected/reconnected with ID:', newSocket.id);
+      addLog(`✅ Socket connected with ID: ${newSocket.id}`);
       // Re-fetch friends to ensure online status is up to date
       fetch('/api/friends', {
         headers: { Authorization: `Bearer ${token}` }
@@ -233,6 +245,10 @@ export default function Dashboard() {
       
       // Notify server we are back online (if needed, though auth handshake usually handles it)
       newSocket.emit('user_online');
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      addLog(`🔌 Socket disconnected: ${reason}`);
     });
 
     setSocket(newSocket);
@@ -315,8 +331,10 @@ export default function Dashboard() {
     });
 
     newSocket.on('call_incoming', (data) => {
+      addLog(`📞 Incoming call from ${data.name} (${data.from})`);
       if (callActiveRef.current || incomingCallRef.current) {
         console.log('Auto-rejecting call from', data.from, 'because we are busy');
+        addLog('⚠️ Auto-rejecting call: Busy');
         newSocket.emit('user_busy', { toSocketId: data.fromSocketId });
         return;
       }
@@ -329,6 +347,7 @@ export default function Dashboard() {
     });
 
     newSocket.on('call_delivered', () => {
+      addLog('ℹ️ Call delivered to remote');
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
@@ -336,23 +355,27 @@ export default function Dashboard() {
     });
 
     newSocket.on('user_busy', () => {
+      addLog('⚠️ Remote user is busy');
       showToast('Пользователь занят');
       handleCallEnded();
       cleanup();
     });
 
     newSocket.on('user_offline', () => {
+      addLog('⚠️ Remote user is offline');
       showToast('Пользователь не в сети');
       handleCallEnded();
       cleanup();
     });
 
     newSocket.on('call_answered_elsewhere', () => {
+      addLog('ℹ️ Call answered on another device');
       setIncomingCall(null);
     });
 
     newSocket.on('call_accepted', ({ from, fromSocketId, supportsWebM }) => {
       console.log('Call accepted by', from);
+      addLog(`✅ Call accepted by ${from}`);
       if (dialingTimeoutRef.current) {
         clearTimeout(dialingTimeoutRef.current);
         dialingTimeoutRef.current = null;
@@ -368,6 +391,7 @@ export default function Dashboard() {
       // and to prevent race conditions with ICE candidates
       setTimeout(() => {
         console.log('Initiating call after delay...');
+        addLog('🚀 Initiating relay connection after delay...');
         initiateCall(fromSocketId);
       }, 1500);
     });
@@ -375,6 +399,7 @@ export default function Dashboard() {
     newSocket.on('call_ended', (data) => {
       const { from, fromSocketId } = data || {};
       console.log('Call ended by remote', from, fromSocketId);
+      addLog(`🔌 Call ended by remote: ${from}`);
       
       // Fallback for older server events without from/fromSocketId
       if (!from && !fromSocketId) {
@@ -451,11 +476,13 @@ export default function Dashboard() {
   const startCall = async (friendId: number) => {
     if (!socket) return;
     
+    addLog(`📞 Starting call to friend ID: ${friendId}`);
     // Cleanup any previous WebRTC state and media streams before starting a new call
     cleanup();
     stopLocalStream();
 
     try {
+      addLog('📸 Requesting camera/mic access...');
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ 
@@ -468,11 +495,13 @@ export default function Dashboard() {
         });
       } catch (e) {
         console.warn('Failed with ideal constraints, trying basic constraints', e);
+        addLog('⚠️ Ideal constraints failed, trying basic...');
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode },
           audio: true
         });
       }
+      addLog('✅ Media stream acquired');
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
@@ -482,6 +511,7 @@ export default function Dashboard() {
       const supportsWebM = typeof window.MediaSource !== 'undefined' && 
         (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
 
+      addLog(`📡 Emitting call_user for room: ${roomId}, supportsWebM: ${supportsWebM}`);
       socket.emit('call_user', {
         userToCall: friendId,
         from: user?.id,
@@ -494,6 +524,7 @@ export default function Dashboard() {
       // Set timeout for connection (ACK) - 5 seconds
       if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = setTimeout(() => {
+        addLog('❌ Connection timeout (no ACK from server/remote)');
         showToast('Не удалось установить соединение');
         handleCallEnded();
       }, 5000);
@@ -502,12 +533,14 @@ export default function Dashboard() {
       if (dialingTimeoutRef.current) clearTimeout(dialingTimeoutRef.current);
       dialingTimeoutRef.current = setTimeout(() => {
         if (callActiveRef.current && !activeCallSocketIdRef.current) {
+          addLog('⚠️ Dialing timeout (remote didn\'t answer)');
           showToast('Абонент не отвечает');
           endCall();
         }
       }, 30000); // 30 seconds timeout
     } catch (err) {
       console.error('Failed to get media devices', err);
+      addLog(`❌ Media access failed: ${err}`);
       showToast('Не удалось получить доступ к камере или микрофону');
     }
   };
@@ -515,11 +548,13 @@ export default function Dashboard() {
   const answerCall = async () => {
     if (!socket) return;
     
+    addLog(`📞 Answering call from ${incomingCall?.name}`);
     // Cleanup any previous WebRTC state and media streams before answering
     cleanup();
     stopLocalStream();
 
     try {
+      addLog('📸 Requesting camera/mic access...');
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ 
@@ -532,11 +567,13 @@ export default function Dashboard() {
         });
       } catch (e) {
         console.warn('Failed with ideal constraints, trying basic constraints', e);
+        addLog('⚠️ Ideal constraints failed, trying basic...');
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode },
           audio: true
         });
       }
+      addLog('✅ Media stream acquired');
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
@@ -546,6 +583,7 @@ export default function Dashboard() {
       const supportsWebM = typeof window.MediaSource !== 'undefined' && 
         (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
 
+      addLog(`📡 Emitting answer_call, supportsWebM: ${supportsWebM}`);
       socket.emit('answer_call', {
         toSocketId: incomingCall.fromSocketId,
         supportsWebM
@@ -556,6 +594,7 @@ export default function Dashboard() {
       setIncomingCall(null);
     } catch (err) {
       console.error('Failed to get media devices', err);
+      addLog(`❌ Media access failed: ${err}`);
       showToast('Не удалось получить доступ к камере или микрофону');
     }
   };
@@ -711,6 +750,13 @@ export default function Dashboard() {
             title="Инструкция"
           >
             <Info size={20} />
+          </button>
+          <button 
+            onClick={() => setShowLogs(true)}
+            className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+            title="Логи отладки"
+          >
+            <Settings size={20} />
           </button>
           {user?.role === 'admin' && (
             <button 
@@ -1034,6 +1080,60 @@ export default function Dashboard() {
               <p>
                 <strong className="text-white">4. Шифрование:</strong> Во время звонка сверху появляются 4 эмодзи. Если у вас и у вашего собеседника они совпадают — ваш звонок надежно зашифрован (как в Telegram).
               </p>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Debug Logs Modal */}
+      {showLogs && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[110] p-4 backdrop-blur-sm">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 max-w-2xl w-full relative flex flex-col max-h-[80vh]"
+          >
+            <button 
+              onClick={() => setShowLogs(false)}
+              className="absolute top-4 right-4 text-zinc-400 hover:text-white"
+            >
+              <X size={24} />
+            </button>
+            <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <Settings size={20} />
+              Логи отладки
+            </h3>
+            
+            <div className="flex-1 overflow-y-auto bg-black rounded-xl p-4 font-mono text-xs text-zinc-400 space-y-1 mb-4">
+              {logs.length === 0 ? (
+                <p className="text-zinc-600 italic">Логов пока нет...</p>
+              ) : (
+                logs.map((log, i) => (
+                  <div key={i} className="border-b border-zinc-800/50 pb-1 last:border-0">
+                    {log}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  const text = logs.join('\n');
+                  navigator.clipboard.writeText(text);
+                  showToast('Логи скопированы!');
+                }}
+                className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Copy size={18} />
+                Копировать всё
+              </button>
+              <button 
+                onClick={() => setLogs([])}
+                className="px-6 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl font-medium transition-colors"
+              >
+                Очистить
+              </button>
             </div>
           </motion.div>
         </div>

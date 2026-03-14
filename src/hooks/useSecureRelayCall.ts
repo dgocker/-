@@ -9,7 +9,8 @@ export function useSecureRelayCall(
   setRemoteStream: (stream: MediaStream | null) => void,
   onCallEnded: () => void,
   remoteVideoRef: React.RefObject<HTMLVideoElement | null>,
-  setAutoplayFailed: (failed: boolean) => void
+  setAutoplayFailed: (failed: boolean) => void,
+  addLog: (msg: string) => void
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '' });
@@ -28,6 +29,7 @@ export function useSecureRelayCall(
   const remoteImgRef = useRef<HTMLImageElement | null>(null);
 
   const cleanup = useCallback(() => {
+    addLog('🧹 Cleaning up call resources...');
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -56,7 +58,7 @@ export function useSecureRelayCall(
     if (remoteVideoRef.current) {
       remoteVideoRef.current.src = '';
     }
-  }, [remoteVideoRef]);
+  }, [remoteVideoRef, addLog]);
 
   const addPadding = (originalBuffer: ArrayBuffer) => {
     const originalView = new Uint8Array(originalBuffer);
@@ -90,11 +92,13 @@ export function useSecureRelayCall(
       }
     } catch (e) {
       console.error('Error appending buffer', e);
+      addLog(`❌ Error appending buffer: ${e}`);
       isAppendingRef.current = false;
     }
   };
 
   const startRecording = () => {
+    addLog('🎥 Starting media recording...');
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
@@ -118,6 +122,7 @@ export function useSecureRelayCall(
 
       if (canUseMediaRecorder) {
         try {
+          addLog(`✅ Using MediaRecorder with mimeType: ${mimeType}`);
           const recorder = new MediaRecorder(activeStreamRef.current, { mimeType });
           mediaRecorderRef.current = recorder;
           recorder.ondataavailable = async (event) => {
@@ -131,7 +136,10 @@ export function useSecureRelayCall(
           return;
         } catch (e) {
           console.error('Failed to start MediaRecorder, falling back to JPEG', e);
+          addLog(`⚠️ MediaRecorder failed: ${e}. Falling back to JPEG.`);
         }
+      } else {
+        addLog('⚠️ MediaRecorder not supported or remote doesn\'t support WebM. Using JPEG fallback.');
       }
 
       // Fallback to JPEG frames (Motion JPEG)
@@ -150,7 +158,10 @@ export function useSecureRelayCall(
       
       if (video.srcObject !== activeStreamRef.current) {
         video.srcObject = activeStreamRef.current;
-        video.play().catch(e => console.error('Fallback video play error', e));
+        video.play().catch(e => {
+          console.error('Fallback video play error', e);
+          addLog(`❌ Fallback video play error: ${e}`);
+        });
       }
 
       fallbackIntervalRef.current = window.setInterval(() => {
@@ -164,33 +175,46 @@ export function useSecureRelayCall(
           wsRef.current.send(dataUrl);
         }
       }, 100); // 10 fps
+    } else {
+      addLog('⚠️ Cannot start recording: stream or websocket not ready');
     }
   };
 
   const setRemoteSupportsWebM = (supports: boolean) => {
     remoteSupportsWebMRef.current = supports;
     console.log('Remote supports WebM:', supports);
+    addLog(`ℹ️ Remote supports WebM: ${supports}`);
   };
 
   const connectToRelay = (roomId: string) => {
     currentRoomIdRef.current = roomId;
     setConnectionState('checking');
+    addLog(`🔗 Connecting to Secure Relay room: ${roomId}`);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/secure-relay?room=${roomId}&token=${RELAY_TOKEN}`;
     
+    addLog(`📡 WebSocket URL: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log('Connected to Secure Relay');
+      addLog('✅ WebSocket connected to Relay');
       setConnectionState('connected');
       setRemoteStream(new MediaStream()); // Trick Dashboard into thinking we have a stream
       startRecording();
     };
 
+    ws.onerror = (e) => {
+      console.error('WebSocket error:', e);
+      addLog(`❌ WebSocket error: ${JSON.stringify(e)}`);
+    };
+
     const isMediaSourceSupported = typeof window.MediaSource !== 'undefined';
     let isMediaSourceFailed = false;
+    
+    addLog(`ℹ️ MediaSource supported: ${isMediaSourceSupported}`);
     
     if (isMediaSourceSupported) {
       try {
@@ -198,9 +222,13 @@ export function useSecureRelayCall(
         if (remoteVideoRef.current) {
           remoteVideoRef.current.src = URL.createObjectURL(mediaSource);
           remoteVideoRef.current.play()
-            .then(() => setAutoplayFailed(false))
+            .then(() => {
+              setAutoplayFailed(false);
+              addLog('✅ Remote video playback started');
+            })
             .catch(e => {
               console.error('Play failed', e);
+              addLog(`⚠️ Remote video play failed: ${e.name}`);
               if (e.name !== 'AbortError') {
                 setAutoplayFailed(true);
               }
@@ -208,13 +236,16 @@ export function useSecureRelayCall(
         }
 
         mediaSource.addEventListener('sourceopen', () => {
+          addLog('ℹ️ MediaSource sourceopen event');
           try {
             let mimeType = 'video/webm; codecs="vp8, opus"';
             if (!MediaSource.isTypeSupported(mimeType)) {
               mimeType = 'video/webm';
+              addLog('⚠️ video/webm; codecs="vp8, opus" not supported, falling back to video/webm');
             }
             const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
             sourceBufferRef.current = sourceBuffer;
+            addLog(`✅ SourceBuffer created with mimeType: ${mimeType}`);
             
             sourceBuffer.addEventListener('updateend', () => {
               isAppendingRef.current = false;
@@ -225,12 +256,14 @@ export function useSecureRelayCall(
             processQueue();
           } catch (e) {
             console.error('SourceBuffer error', e);
+            addLog(`❌ SourceBuffer error: ${e}`);
             isMediaSourceFailed = true;
             queueRef.current = []; // Clear queue to avoid memory leak
           }
         });
       } catch (e) {
         console.error('MediaSource initialization failed', e);
+        addLog(`❌ MediaSource init failed: ${e}`);
         isMediaSourceFailed = true;
       }
     } else {
@@ -248,6 +281,7 @@ export function useSecureRelayCall(
             remoteImgRef.current.className = remoteVideoRef.current.className;
             remoteImgRef.current.style.display = 'block';
             remoteVideoRef.current.parentElement?.appendChild(remoteImgRef.current);
+            addLog('ℹ️ Switched to JPEG fallback display');
           }
           remoteImgRef.current.src = event.data;
         }
@@ -263,7 +297,8 @@ export function useSecureRelayCall(
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+      addLog(`🔌 WebSocket closed: ${e.code} ${e.reason}`);
       cleanup();
       onCallEnded();
     };
