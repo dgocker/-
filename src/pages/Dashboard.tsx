@@ -120,11 +120,10 @@ export default function Dashboard() {
     }, 300);
   };
 
-  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef);
+  const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const { initiateCall, cleanup, peerConnection, connectionState, setVideoQuality, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
-
-  const [autoplayFailed, setAutoplayFailed] = useState(false);
 
   // Auto-recovery for frozen video
   useEffect(() => {
@@ -160,32 +159,6 @@ export default function Dashboard() {
 
     playVideo();
   }, [localStream]);
-
-  useEffect(() => {
-    const video = remoteVideoRef.current;
-    if (!video || !remoteStream) return;
-
-    // We no longer set srcObject here because useSecureRelayCall handles MediaSource
-    // video.srcObject = remoteStream;
-
-    const playVideo = async () => {
-      try {
-        await video.play();
-        setAutoplayFailed(false);
-        console.log('✅ Remote video played successfully');
-      } catch (e: any) {
-        // Игнорируем race conditions — это нормально в WebRTC
-        if (e.name === 'AbortError') {
-          console.log('⚠️ Play aborted (normal race in WebRTC)');
-          return;
-        }
-        console.error("Remote video play failed:", e);
-        setAutoplayFailed(true);
-      }
-    };
-
-    playVideo();
-  }, [remoteStream]);
 
   const handleManualPlay = () => {
     if (remoteVideoRef.current) {
@@ -350,6 +323,9 @@ export default function Dashboard() {
       // Send delivery confirmation immediately
       newSocket.emit('call_delivered', { to: data.from });
       setIncomingCall(data);
+      if (data.supportsWebM !== undefined) {
+        setRemoteSupportsWebM(data.supportsWebM);
+      }
     });
 
     newSocket.on('call_delivered', () => {
@@ -375,7 +351,7 @@ export default function Dashboard() {
       setIncomingCall(null);
     });
 
-    newSocket.on('call_accepted', ({ from, fromSocketId }) => {
+    newSocket.on('call_accepted', ({ from, fromSocketId, supportsWebM }) => {
       console.log('Call accepted by', from);
       if (dialingTimeoutRef.current) {
         clearTimeout(dialingTimeoutRef.current);
@@ -384,6 +360,9 @@ export default function Dashboard() {
       setCallActive(true);
       setActiveCallUserId(from);
       setActiveCallSocketId(fromSocketId);
+      if (supportsWebM !== undefined) {
+        setRemoteSupportsWebM(supportsWebM);
+      }
       
       // Add a small delay before initiating the call to ensure the other side is fully ready
       // and to prevent race conditions with ICE candidates
@@ -477,25 +456,38 @@ export default function Dashboard() {
     stopLocalStream();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }, 
-        audio: true 
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }, 
+          audio: true 
+        });
+      } catch (e) {
+        console.warn('Failed with ideal constraints, trying basic constraints', e);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: true
+        });
+      }
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
       setActiveCallUserId(friendId);
       
       const roomId = `room-${Math.random().toString(36).substring(7)}`;
+      const supportsWebM = typeof window.MediaSource !== 'undefined' && 
+        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+
       socket.emit('call_user', {
         userToCall: friendId,
         from: user?.id,
         name: user?.first_name,
-        roomId
+        roomId,
+        supportsWebM
       });
       joinRoom(roomId);
 
@@ -528,22 +520,35 @@ export default function Dashboard() {
     stopLocalStream();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }, 
-        audio: true 
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }, 
+          audio: true 
+        });
+      } catch (e) {
+        console.warn('Failed with ideal constraints, trying basic constraints', e);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: true
+        });
+      }
       setAndStoreLocalStream(stream);
       setCallActive(true);
       setAutoplayFailed(false);
       setActiveCallUserId(incomingCall.from);
       setActiveCallSocketId(incomingCall.fromSocketId);
       
+      const supportsWebM = typeof window.MediaSource !== 'undefined' && 
+        (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || MediaSource.isTypeSupported('video/webm'));
+
       socket.emit('answer_call', {
-        toSocketId: incomingCall.fromSocketId
+        toSocketId: incomingCall.fromSocketId,
+        supportsWebM
       });
       if (incomingCall.roomId) {
         joinRoom(incomingCall.roomId);
@@ -603,14 +608,23 @@ export default function Dashboard() {
     const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
     
     try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: newFacingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: true
-      });
+      let newStream: MediaStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            facingMode: newFacingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: true
+        });
+      } catch (e) {
+        console.warn('Failed with ideal constraints, trying basic constraints', e);
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: newFacingMode },
+          audio: true
+        });
+      }
       
       // Stop ALL old tracks BEFORE updating state
       if (activeStreamRef.current) {
@@ -844,7 +858,6 @@ export default function Dashboard() {
               onClick={handleManualPlay}
             >
               <video 
-                key={remoteStream ? 'remote-stream-active' : 'remote-stream-loading'}
                 ref={remoteVideoRef} 
                 autoPlay 
                 playsInline 
@@ -888,7 +901,6 @@ export default function Dashboard() {
               onClick={handleLocalVideoClick}
             >
                <video 
-                key={localStream ? 'local-stream-active' : 'local-stream-loading'}
                 ref={localVideoRef} 
                 autoPlay 
                 playsInline 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 
 const RELAY_TOKEN = 'super-secret-anti-dpi-token-2026';
@@ -6,9 +6,10 @@ const RELAY_TOKEN = 'super-secret-anti-dpi-token-2026';
 export function useSecureRelayCall(
   socket: Socket | null,
   activeStreamRef: React.MutableRefObject<MediaStream | null>,
-  setRemoteStream: (stream: MediaStream | null) => void, // Kept for compatibility, though we use MediaSource directly
+  setRemoteStream: (stream: MediaStream | null) => void,
   onCallEnded: () => void,
-  remoteVideoRef: React.RefObject<HTMLVideoElement | null>
+  remoteVideoRef: React.RefObject<HTMLVideoElement | null>,
+  setAutoplayFailed: (failed: boolean) => void
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '' });
@@ -18,6 +19,13 @@ export function useSecureRelayCall(
   const sourceBufferRef = useRef<SourceBuffer | null>(null);
   const isAppendingRef = useRef(false);
   const currentRoomIdRef = useRef<string | null>(null);
+  const remoteSupportsWebMRef = useRef<boolean>(true); // Assume true until told otherwise
+  
+  // Fallback refs
+  const fallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fallbackVideoRef = useRef<HTMLVideoElement | null>(null);
+  const fallbackIntervalRef = useRef<number | null>(null);
+  const remoteImgRef = useRef<HTMLImageElement | null>(null);
 
   const cleanup = useCallback(() => {
     if (wsRef.current) {
@@ -27,9 +35,24 @@ export function useSecureRelayCall(
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+    if (fallbackIntervalRef.current) {
+      window.clearInterval(fallbackIntervalRef.current);
+      fallbackIntervalRef.current = null;
+    }
+    if (fallbackVideoRef.current) {
+      fallbackVideoRef.current.srcObject = null;
+    }
+    if (remoteImgRef.current) {
+      remoteImgRef.current.remove();
+      remoteImgRef.current = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.style.display = 'block';
+    }
     setConnectionState('disconnected');
     queueRef.current = [];
     currentRoomIdRef.current = null;
+    remoteSupportsWebMRef.current = true;
     if (remoteVideoRef.current) {
       remoteVideoRef.current.src = '';
     }
@@ -75,26 +98,78 @@ export function useSecureRelayCall(
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    if (activeStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        let mimeType = 'video/webm; codecs="vp8, opus"';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm';
-        }
-        const recorder = new MediaRecorder(activeStreamRef.current, { mimeType });
-        mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = async (event) => {
-          if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-            const buffer = await event.data.arrayBuffer();
-            const paddedData = addPadding(buffer);
-            wsRef.current.send(paddedData);
-          }
-        };
-        recorder.start(200);
-      } catch (e) {
-        console.error('Failed to start MediaRecorder', e);
-      }
+    if (fallbackIntervalRef.current) {
+      window.clearInterval(fallbackIntervalRef.current);
     }
+
+    if (activeStreamRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      const isMediaRecorderSupported = typeof MediaRecorder !== 'undefined';
+      let mimeType = 'video/webm; codecs="vp8, opus"';
+      let canUseMediaRecorder = false;
+
+      if (isMediaRecorderSupported && remoteSupportsWebMRef.current) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          canUseMediaRecorder = true;
+        } else if (MediaRecorder.isTypeSupported('video/webm')) {
+          mimeType = 'video/webm';
+          canUseMediaRecorder = true;
+        }
+      }
+
+      if (canUseMediaRecorder) {
+        try {
+          const recorder = new MediaRecorder(activeStreamRef.current, { mimeType });
+          mediaRecorderRef.current = recorder;
+          recorder.ondataavailable = async (event) => {
+            if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+              const buffer = await event.data.arrayBuffer();
+              const paddedData = addPadding(buffer);
+              wsRef.current.send(paddedData);
+            }
+          };
+          recorder.start(200);
+          return;
+        } catch (e) {
+          console.error('Failed to start MediaRecorder, falling back to JPEG', e);
+        }
+      }
+
+      // Fallback to JPEG frames (Motion JPEG)
+      if (!fallbackCanvasRef.current) {
+        fallbackCanvasRef.current = document.createElement('canvas');
+      }
+      if (!fallbackVideoRef.current) {
+        fallbackVideoRef.current = document.createElement('video');
+        fallbackVideoRef.current.muted = true;
+        fallbackVideoRef.current.playsInline = true;
+      }
+      
+      const canvas = fallbackCanvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const video = fallbackVideoRef.current;
+      
+      if (video.srcObject !== activeStreamRef.current) {
+        video.srcObject = activeStreamRef.current;
+        video.play().catch(e => console.error('Fallback video play error', e));
+      }
+
+      fallbackIntervalRef.current = window.setInterval(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN && video.videoWidth > 0) {
+          // Downscale slightly for better performance over WebSocket
+          const scale = 0.5;
+          canvas.width = video.videoWidth * scale;
+          canvas.height = video.videoHeight * scale;
+          ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+          wsRef.current.send(dataUrl);
+        }
+      }, 100); // 10 fps
+    }
+  };
+
+  const setRemoteSupportsWebM = (supports: boolean) => {
+    remoteSupportsWebMRef.current = supports;
+    console.log('Remote supports WebM:', supports);
   };
 
   const connectToRelay = (roomId: string) => {
@@ -114,35 +189,79 @@ export function useSecureRelayCall(
       startRecording();
     };
 
-    const mediaSource = new MediaSource();
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.src = URL.createObjectURL(mediaSource);
-      remoteVideoRef.current.play().catch(e => console.error('Play failed', e));
+    const isMediaSourceSupported = typeof window.MediaSource !== 'undefined';
+    let isMediaSourceFailed = false;
+    
+    if (isMediaSourceSupported) {
+      try {
+        const mediaSource = new MediaSource();
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.src = URL.createObjectURL(mediaSource);
+          remoteVideoRef.current.play()
+            .then(() => setAutoplayFailed(false))
+            .catch(e => {
+              console.error('Play failed', e);
+              if (e.name !== 'AbortError') {
+                setAutoplayFailed(true);
+              }
+            });
+        }
+
+        mediaSource.addEventListener('sourceopen', () => {
+          try {
+            let mimeType = 'video/webm; codecs="vp8, opus"';
+            if (!MediaSource.isTypeSupported(mimeType)) {
+              mimeType = 'video/webm';
+            }
+            const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            sourceBufferRef.current = sourceBuffer;
+            
+            sourceBuffer.addEventListener('updateend', () => {
+              isAppendingRef.current = false;
+              processQueue();
+            });
+            
+            // Process any queued chunks that arrived before sourceopen
+            processQueue();
+          } catch (e) {
+            console.error('SourceBuffer error', e);
+            isMediaSourceFailed = true;
+            queueRef.current = []; // Clear queue to avoid memory leak
+          }
+        });
+      } catch (e) {
+        console.error('MediaSource initialization failed', e);
+        isMediaSourceFailed = true;
+      }
+    } else {
+      isMediaSourceFailed = true;
     }
 
-    mediaSource.addEventListener('sourceopen', () => {
-      try {
-        let mimeType = 'video/webm; codecs="vp8, opus"';
-        if (!MediaSource.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm';
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string' && event.data.startsWith('data:image/jpeg')) {
+        // Handle JPEG fallback frame
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.style.display = 'none'; // Hide video element
+          
+          if (!remoteImgRef.current) {
+            remoteImgRef.current = document.createElement('img');
+            remoteImgRef.current.className = remoteVideoRef.current.className;
+            remoteImgRef.current.style.display = 'block';
+            remoteVideoRef.current.parentElement?.appendChild(remoteImgRef.current);
+          }
+          remoteImgRef.current.src = event.data;
         }
-        const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-        sourceBufferRef.current = sourceBuffer;
-        
-        sourceBuffer.addEventListener('updateend', () => {
-          isAppendingRef.current = false;
-          processQueue();
-        });
-
-        ws.onmessage = (event) => {
+      } else if (event.data instanceof ArrayBuffer) {
+        // Handle WebM padded buffer
+        if (!isMediaSourceFailed) {
           const unpaddedData = removePadding(event.data);
           queueRef.current.push(new Uint8Array(unpaddedData));
-          processQueue();
-        };
-      } catch (e) {
-        console.error('SourceBuffer error', e);
+          if (sourceBufferRef.current) {
+            processQueue();
+          }
+        }
       }
-    });
+    };
 
     ws.onclose = () => {
       cleanup();
@@ -152,9 +271,6 @@ export function useSecureRelayCall(
 
   // Compatibility with Dashboard.tsx
   const initiateCall = (targetSocketId: string) => {
-    // In relay mode, the caller already connected to the room when they clicked "Call".
-    // We don't need to do WebRTC signaling here.
-    // But we can start recording if we haven't already.
     startRecording();
   };
 
@@ -162,7 +278,6 @@ export function useSecureRelayCall(
     console.log('Quality adjustment not supported in Relay mode yet');
   };
 
-  // Expose a way to connect to a room
   const joinRoom = (roomId: string) => {
     connectToRelay(roomId);
   };
@@ -170,12 +285,13 @@ export function useSecureRelayCall(
   return {
     initiateCall,
     cleanup,
-    peerConnection: { current: null }, // Dummy to prevent crashes
+    peerConnection: { current: null },
     connectionState,
     setVideoQuality,
     stats,
     secureEmojis: ['🔒', '🛡️', '📡'],
     joinRoom,
-    startRecording
+    startRecording,
+    setRemoteSupportsWebM
   };
 }

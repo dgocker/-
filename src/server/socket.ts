@@ -50,11 +50,11 @@ export function setupSocket(io: Server) {
 
     // WebRTC Signaling
     socket.on('call_user', (data) => {
-      const { userToCall, from, name, roomId } = data;
+      const { userToCall, from, name, roomId, supportsWebM } = data;
       const targetSockets = onlineUsers.get(userToCall);
       if (targetSockets && targetSockets.size > 0) {
         targetSockets.forEach(socketId => {
-          io.to(socketId).emit('call_incoming', { from, name, fromSocketId: socket.id, roomId });
+          io.to(socketId).emit('call_incoming', { from, name, fromSocketId: socket.id, roomId, supportsWebM });
         });
       } else {
         socket.emit('user_offline');
@@ -72,8 +72,8 @@ export function setupSocket(io: Server) {
     });
 
     socket.on('answer_call', (data) => {
-      const { toSocketId } = data;
-      io.to(toSocketId).emit('call_accepted', { from: userId, fromSocketId: socket.id });
+      const { toSocketId, supportsWebM } = data;
+      io.to(toSocketId).emit('call_accepted', { from: userId, fromSocketId: socket.id, supportsWebM });
       
       // Notify other tabs of the same user to dismiss the incoming call
       const myOtherSockets = onlineUsers.get(userId);
