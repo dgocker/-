@@ -152,43 +152,21 @@ export function useSecureRelayCall(
     }
   };
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioSourceBufferRef = useRef<SourceBuffer | null>(null);
-  const audioMediaSourceRef = useRef<MediaSource | null>(null);
-  const audioQueueRef = useRef<Uint8Array[]>([]);
-  const isAudioAppendingRef = useRef(false);
-
-  // Initialize audio element
-  useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = document.createElement('audio');
-      audioRef.current.autoplay = true;
-      audioRef.current.playsInline = true;
-      document.body.appendChild(audioRef.current);
-    }
-    return () => {
-      if (audioRef.current) {
-        document.body.removeChild(audioRef.current);
-        audioRef.current = null;
-      }
-    };
-  }, []);
-
   // === Аудио fallback плеер ===
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const mediaSrcRef = useRef<ManagedMediaSource | MediaSource | null>(null);
+  const mediaSrcRef = useRef<any | MediaSource | null>(null);
   const audioBufferRef = useRef<SourceBuffer | null>(null);
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
-  const isAppendingRef = useRef(false);
+  const isAudioAppendingRef = useRef(false);
   const audioInitHeaderRef = useRef<ArrayBuffer | null>(null);
   const AUDIO_MIME = 'audio/mp4; codecs="mp4a.40.2"';
 
   const drainAudioQueue = () => {
-    isAppendingRef.current = false;
+    isAudioAppendingRef.current = false;
     if (audioQueueRef.current.length > 0 && audioBufferRef.current && !audioBufferRef.current.updating) {
       const nextChunk = audioQueueRef.current.shift();
       if (nextChunk) {
-        isAppendingRef.current = true;
+        isAudioAppendingRef.current = true;
         audioBufferRef.current.appendBuffer(nextChunk);
         addLog(`🎙️ Appending chunk (${nextChunk.byteLength} bytes)`);
       }
@@ -246,8 +224,8 @@ export function useSecureRelayCall(
       return;
     }
 
-    if (audioBufferRef.current && !audioBufferRef.current.updating && !isAppendingRef.current) {
-      isAppendingRef.current = true;
+    if (audioBufferRef.current && !audioBufferRef.current.updating && !isAudioAppendingRef.current) {
+      isAudioAppendingRef.current = true;
       audioBufferRef.current.appendBuffer(chunk);
       addLog(`🎙️ Appending chunk (${size} bytes)`);
     } else {
@@ -486,7 +464,7 @@ export function useSecureRelayCall(
     setSecureEmojis(result);
   };
 
-  const connectToRelay = (roomId: string) => {
+  const connectToRelay = (roomId: string, retryCount: number = 0) => {
     currentRoomIdRef.current = roomId;
     generateEmojis(roomId);
     setConnectionState('checking');
@@ -699,9 +677,9 @@ export function useSecureRelayCall(
       if (remoteVideoRef.current) {
         remoteVideoRef.current.play().catch(() => {});
       }
-      if (audioRef.current) {
+      if (audioPlayerRef.current) {
         addLog('🎙️ Manually playing audio element');
-        audioRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
+        audioPlayerRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
       }
     }
   };
