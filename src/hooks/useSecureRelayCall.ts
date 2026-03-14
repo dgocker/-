@@ -608,19 +608,16 @@ export function useSecureRelayCall(
         // If we are in fallback mode or the type is MP4, we might need special handling
         const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
         
-        if (!isMediaSourceFailed && sourceBufferRef.current) {
+        if (type === 0 && !isMediaSourceFailed && sourceBufferRef.current) {
+          // Video/Audio WebM
           queueRef.current.push(new Uint8Array(unpaddedData));
           processQueue();
-        } else {
-          // Audio playback fallback
-          if (type === 0) {
-            playAudioChunk(unpaddedData);
-          } else if (type === 1) {
-            if (audioChunkCountRef.current === 0) {
-              addLog('🎙️ Receiving MP4 audio chunks (fallback)');
-            }
-            playAudioChunk(unpaddedData);
-          }
+        } else if (type === 1) {
+          // Audio MP4
+          playAudioChunk(unpaddedData);
+        } else if (type === 0 && isMediaSourceFailed) {
+          // Audio WebM fallback
+          playAudioChunk(unpaddedData);
         }
       }
     };
