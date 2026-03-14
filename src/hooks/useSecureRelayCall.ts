@@ -217,6 +217,17 @@ export function useSecureRelayCall(
 
   const playAudioChunk = async (chunk: ArrayBuffer) => {
     addLog(`🎙️ playAudioChunk received ${chunk.byteLength} bytes`);
+    
+    // Ensure AudioContext is running
+    if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        addLog('🎙️ AudioContext initialized');
+    }
+    if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+        addLog('🎙️ AudioContext resumed');
+    }
+
     // If we don't have a header, this might be it (first chunk)
     if (!audioHeaderRef.current || audioHeaderRef.current.length < 10) {
       audioHeaderRef.current = new Uint8Array(chunk);
@@ -679,6 +690,10 @@ export function useSecureRelayCall(
       }
       if (remoteVideoRef.current) {
         remoteVideoRef.current.play().catch(() => {});
+      }
+      if (audioRef.current) {
+        addLog('🎙️ Manually playing audio element');
+        audioRef.current.play().catch(e => addLog(`❌ Audio play failed: ${e}`));
       }
     }
   };
