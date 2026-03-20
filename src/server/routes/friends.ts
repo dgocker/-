@@ -1,15 +1,26 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { db } from '../db.js';
 import { authenticateToken, AuthRequest } from '../authMiddleware.js';
 
 const router = express.Router();
 
+function generateShortCode(length: number = 5): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid confusing chars like 0, O, 1, I
+  let result = '';
+  const bytes = crypto.randomBytes(length);
+  for (let i = 0; i < length; i++) {
+    result += chars[bytes[i] % chars.length];
+  }
+  return result;
+}
+
 router.use(authenticateToken);
 
 router.post('/links', async (req: AuthRequest, res) => {
   try {
-    const code = uuidv4();
+    const code = generateShortCode();
     const stmt = db.prepare('INSERT INTO friend_links (code, created_by) VALUES (?, ?)');
     const info = await stmt.run(code, req.user.id);
     const link = await db.prepare('SELECT * FROM friend_links WHERE id = ?').get(info.lastInsertRowid) as any;
@@ -23,7 +34,10 @@ router.post('/links', async (req: AuthRequest, res) => {
 router.post('/add', async (req: AuthRequest, res) => {
   try {
     const { code } = req.body;
-    const link = await db.prepare('SELECT * FROM friend_links WHERE code = ?').get(code) as any;
+    if (!code) return res.status(400).json({ error: 'Code is required' });
+    
+    // Case-insensitive lookup
+    const link = await db.prepare('SELECT * FROM friend_links WHERE UPPER(code) = UPPER(?)').get(code) as any;
     
     if (!link) {
       return res.status(404).json({ error: 'Invalid friend link' });

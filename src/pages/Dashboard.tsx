@@ -18,6 +18,8 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<string[]>([]);
   const [logsTab, setLogsTab] = useState<'metrics' | 'log'>('metrics');
   const [showLogs, setShowLogs] = useState(false);
+  const [friendCode, setFriendCode] = useState('');
+  const [isAddingFriend, setIsAddingFriend] = useState(false);
   
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -585,11 +587,8 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        // Use Telegram Web App deep link format
-        // Format: https://t.me/BOT_USERNAME/APP_NAME?startapp=friend-CODE
-        const botName = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'Vid_dm_qwe_bot';
-        const appName = 'Call'; // Assuming 'Call' is the short name based on user request
-        const link = `https://t.me/${botName}/${appName}?startapp=friend-${data.link.code}`;
+        // Direct site link instead of Telegram
+        const link = `${window.location.origin}/add-friend/${data.link.code}`;
         
         if (navigator.share) {
           try {
@@ -608,6 +607,46 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Failed to generate link', err);
+    }
+  };
+
+  const handleManualAddFriend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!friendCode || friendCode.length < 5) {
+      showToast('Введите 5-значный код');
+      return;
+    }
+
+    setIsAddingFriend(true);
+    try {
+      const res = await fetch('/api/friends/add', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ code: friendCode.trim() })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast('Друг успешно добавлен!');
+        setFriendCode('');
+        // Refresh friends list
+        const resFriends = await fetch('/api/friends', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const dataFriends = await resFriends.json();
+        if (resFriends.ok) setFriends(dataFriends.friends);
+        
+        if (socket) socket.emit('refresh_friends');
+      } else {
+        showToast(data.error || 'Ошибка добавления');
+      }
+    } catch (err) {
+      showToast('Произошла ошибка');
+    } finally {
+      setIsAddingFriend(false);
     }
   };
 
@@ -995,7 +1034,7 @@ export default function Dashboard() {
       </header>
 
       <main>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-2">
           <h2 className="text-2xl font-semibold flex items-center gap-2">
             <Users size={24} className="text-zinc-400" />
             Друзья
@@ -1005,8 +1044,29 @@ export default function Dashboard() {
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-colors"
           >
             {linkCopied ? <CheckCircle2 size={16} /> : <Share2 size={16} />}
-            {linkCopied ? 'Скопировано!' : 'Пригласить друга'}
+            {linkCopied ? 'Скопировано!' : 'Ссылка для друга'}
           </button>
+        </div>
+
+        {/* Manual code entry */}
+        <div className="mb-6">
+          <form onSubmit={handleManualAddFriend} className="flex gap-2">
+            <input 
+              type="text"
+              placeholder="Введите 5-значный код друга..."
+              value={friendCode}
+              onChange={(e) => setFriendCode(e.target.value.toUpperCase())}
+              maxLength={5}
+              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors"
+            />
+            <button 
+              type="submit"
+              disabled={isAddingFriend || friendCode.length < 5}
+              className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-colors"
+            >
+              {isAddingFriend ? '...' : 'Добавить'}
+            </button>
+          </form>
         </div>
 
         <div className="grid gap-4">
