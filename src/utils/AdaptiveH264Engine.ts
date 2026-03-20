@@ -224,7 +224,7 @@ export class AdaptiveH264Engine {
   // === ДОБАВЛЯЕМ МЕТОД ИЗ ТЕСТА ===
   private async processEncodedFrame(data: Uint8Array, startTime: number) {
     if (data.length > 250000) {
-      if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length/1024)}KB). Dropping to prevent buffer bloat.`);
+      if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length / 1024)}KB). Dropping to prevent buffer bloat.`);
       this.needsKeyframe = true;
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
       this.applyBitrateToParams();
@@ -237,7 +237,7 @@ export class AdaptiveH264Engine {
       if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
 
       this.tokenBucketBytes -= data.length;
-      this.lastEncodeTs = performance.now(); 
+      this.lastEncodeTs = performance.now();
 
       if (this.sharedSecret) {
         const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -245,7 +245,7 @@ export class AdaptiveH264Engine {
           return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
         });
       }
-    
+
       const senderTs = Math.floor(performance.now() - this.sessionStartTime);
       const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
       for (const part of parts) {
@@ -254,12 +254,12 @@ export class AdaptiveH264Engine {
           enqueueTime: performance.now()
         });
       }
-      
+
       this.encodeDurationLog.push(performance.now() - startTime);
       if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
-      
+
     } catch (e) {
-       if (this.onLog) this.onLog(`❌ VideoEncoder output processing error: ${e}`);
+      if (this.onLog) this.onLog(`❌ VideoEncoder output processing error: ${e}`);
     } finally {
       this.pendingFrames = Math.max(0, this.pendingFrames - 1);
     }
@@ -316,13 +316,13 @@ export class AdaptiveH264Engine {
     if (!this.encoder || !this.isConfigured) return;
 
     const kbps = this.targetBitrate / 1024;
-    
+
     // Математика распределения:
     // < 300 kbps: 10 FPS (экономия для голоса и базовых движений)
     // < 800 kbps: 15 FPS (плавно для вебки, экономит 50% битрейта)
     // < 1500 kbps: 24 FPS (кинематографичный стандарт)
     // > 1500 kbps: 30 FPS
-    
+
     if (kbps < 300) this.currentFps = 10;
     else if (kbps < 800) this.currentFps = 15;
     else if (kbps < 1500) this.currentFps = 24;
@@ -337,7 +337,7 @@ export class AdaptiveH264Engine {
       this.currentScale = 0.75; // Уход в ~480p/540p
     } else {
       // Если RTT хороший, возвращаем 720p
-      this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0; 
+      this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
     }
 
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
@@ -354,7 +354,7 @@ export class AdaptiveH264Engine {
           // Если FPS падает до 15, I-Frame каждые 60 кадров = каждые 4 секунды (слишком долго для восстановления)
           // Ставим I-frame каждые 2 секунды:
           // @ts-ignore
-          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 } 
+          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 }
         });
         this.lastConfiguredBitrate = this.targetBitrate;
       } catch (e) { }
@@ -362,13 +362,12 @@ export class AdaptiveH264Engine {
   }
 
   private updateCongestionControl() {
-    if (this.manualMode) return; 
+    if (this.manualMode) return;
 
     const now = performance.now();
     const metrics = this.getNetworkMetrics();
     const buffered = metrics.bufferedAmount;
-    
-    // Calculate buffered gradient (derivative)
+
     const dt = Math.max(1, now - this.lastCongestionUpdate);
     if (dt > 100) {
       const currentGradient = (buffered - this.lastBufferedAmount) / dt;
@@ -378,68 +377,65 @@ export class AdaptiveH264Engine {
     }
 
     const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
-    
-    // Proactive Bitrate Penalty based on buffer pressure
-    const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
+
+    // Снижаем допустимый лимит буфера для штрафа до 100 КБ (защита от OS Bufferbloat)
+    const maxWsBuffer = Math.max(100000, (this.targetBitrate / 8) * 0.5);
     const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
     if (bufferPressure > 0.3) {
-        const penalty = (bufferPressure - 0.3) * 0.6; 
-        this.targetBitrate *= (1.0 - penalty);
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate);
+      const penalty = (bufferPressure - 0.3) * 0.6;
+      this.targetBitrate *= (1.0 - penalty);
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate);
     }
-    
+
     let stateChanged = false;
     const oldBitrate = this.targetBitrate;
 
-    const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 100000;
-    // Снижаем порог чувствительности к задержке очереди
-    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || isBufferGrowing || queueDelay > 400; // Было 600    
+    const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
+
+    // Четкое условие перегрузки: доверяем RTT
+    const isOveruse = this.delayTrend > 20 || isBufferGrowing || queueDelay > 200 || this.lastSmoothedRtt > 250;
+
     if (isOveruse) {
-      if (this.aiState !== 'congested') {
-         this.aiState = 'congested';
-         const cutFactor = this.lastSmoothedRtt > 1000 ? 0.7 : 0.9;
-         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
-         stateChanged = true;
+      if (this.aiState !== 'congested' || now - this.lastCongestionTs > 1000) {
+        this.aiState = 'congested';
+        // Multiplicative Decrease: Жестко рубим
+        const cutFactor = this.lastSmoothedRtt > 500 ? 0.6 : 0.8;
+        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
+        this.lastCongestionTs = now;
+        stateChanged = true;
       }
     } else {
-      if (this.aiState === 'congested') {
-        this.aiState = 'recovery';
+      // Состояния recovery больше нет! Ждем 1.5 сек после пробки и переходим в steady
+      if (this.aiState === 'congested' && now - this.lastCongestionTs > 1500) {
+        this.aiState = 'steady';
         stateChanged = true;
       }
 
-      if (this.aiState === 'recovery') {
-        const recoveryFactor = this.lastSmoothedRtt < 250 ? 1.15 : 1.08; 
-        this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * recoveryFactor + 100000); 
-        if (this.targetBitrate >= oldBitrate * 1.1 || this.lastSmoothedRtt < 150) { 
-           this.aiState = 'steady';
-        }
-      } else if (this.aiState === 'steady') {
-        if (now - this.lastSteadyIncrease > 300) { 
-          // Более плавный рост
-          const growthFactor = this.lastSmoothedRtt < 150 ? 1.05 : 1.02; // Было 1.10 / 1.05
-          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * growthFactor + 5000);
+      if (this.aiState === 'steady') {
+        if (now - this.lastSteadyIncrease > 500) {
+          // Additive Increase: Линейный рост по 5-15 кбит/с (НЕ умножение)
+          const growth = this.lastSmoothedRtt < 150 ? 15000 : 5000;
+          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + growth);
           this.lastSteadyIncrease = now;
         }
 
-        if (!this.isProbing && now - this.probingStartTs > 12000) { 
+        if (!this.isProbing && now - this.probingStartTs > 12000) {
           this.isProbing = true;
           this.probingStartTs = now;
         }
 
         if (this.isProbing) {
           if (now - this.probingStartTs < 250) {
-            // МАТЕМАТИКА: Прощупываем сеть ростом на +15%, а не умножением на 2!
-            // Умножение на 2 убивало 1Мбит каналы мгновенно.
-            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 1.15); 
+            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 1.10); // Максимум +10%
           } else {
             this.isProbing = false;
-            this.probingStartTs = now; 
+            this.probingStartTs = now;
           }
         }
       }
     }
 
-    if (Math.abs(this.targetBitrate - oldBitrate) > 1000 || stateChanged) {
+    if (Math.abs(this.targetBitrate - oldBitrate) > 5000 || stateChanged) {
       this.applyBitrateToParams();
     }
   }
@@ -448,15 +444,14 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.lastRtt = rtt;
 
-    if (rtt > 500 && this.bufferedGradient > 0) { 
+    // Экстренный тормоз: доверяем RTT. Если пинг > 600мс, режем битрейт сразу!
+    if (rtt > 600 && now - this.lastCongestionTs > 1000) {
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
-      this.sendQueue = []; 
+      this.sendQueue = [];
       this.applyBitrateToParams();
-      this.rttHistory = [this.lastSmoothedRtt || 200]; 
-      return;
-    } else if (rtt > 500) {
-      this.rttHistory = [this.lastSmoothedRtt || 200]; 
-      return;
+      this.aiState = 'congested';
+      this.lastCongestionTs = now;
+      if (this.onLog) this.onLog(`🚨 RTT Panic (${Math.round(rtt)}ms): Halving bitrate to ${Math.round(this.targetBitrate / 1024)}k`);
     }
 
     this.rttHistory.push(Math.max(20, rtt));
@@ -465,25 +460,16 @@ export class AdaptiveH264Engine {
     const sorted = [...this.rttHistory].sort((a, b) => a - b);
     let medianRtt = sorted[Math.floor(sorted.length / 2)];
 
-    // Protection against Zombie RTT (Audit 4)
-    if (medianRtt > 2000 && this.pendingFrames === 0) {
-      medianRtt = this.lastSmoothedRtt || 150;
-      this.rttHistory = [medianRtt];
-    }
-
-    // Hard Cap for the median used in GCC calculations
+    // Ограничиваем сверху, но не сбрасываем историю!
     const clampedRtt = Math.min(medianRtt, 3000);
 
-    // Smoothed RTT (EMA with 0.7/0.3 weight to filter spikes)
-    // Attempt 6: Asymmetric RTT Smoothing (EMA)
     const prevSmoothed = this.lastSmoothedRtt || clampedRtt;
     if (clampedRtt < prevSmoothed) {
-      this.lastSmoothedRtt = prevSmoothed * 0.5 + clampedRtt * 0.5; // Fast drop reaction
+      this.lastSmoothedRtt = prevSmoothed * 0.5 + clampedRtt * 0.5; // Быстрая реакция на улучшение
     } else {
-      this.lastSmoothedRtt = prevSmoothed * 0.8 + clampedRtt * 0.2; // Slow rise reaction
+      this.lastSmoothedRtt = prevSmoothed * 0.8 + clampedRtt * 0.2; // Плавная реакция на ухудшение
     }
 
-    // Delay Trend (Derivative)
     const dt = (now - this.lastUpdateTs) / 1000;
     if (dt >= 0.2) {
       this.delayTrend = (this.lastSmoothedRtt - prevSmoothed) / dt;
@@ -613,11 +599,11 @@ export class AdaptiveH264Engine {
     const timeDeltaMs = now - this.lastTokenUpdate;
     if (timeDeltaMs > 0) {
       const tokensToAdd = (this.targetBitrate / 8) * (timeDeltaMs / 1000);
-      const maxBurst = (this.targetBitrate / 8) * 1.5;
+      const maxBurst = (this.targetBitrate / 8) * 0.5;
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
-      
+
       // ВОЗВРАЩАЕМ ПРОЩЕНИЕ ДОЛГА ИЗ ТЕСТА:
-      const maxDebt = -this.targetBitrate / 40; 
+      const maxDebt = -this.targetBitrate / 40;
       if (this.tokenBucketBytes < maxDebt) {
         this.tokenBucketBytes = maxDebt;
       }
@@ -625,9 +611,9 @@ export class AdaptiveH264Engine {
     }
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
-    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) { 
+    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) {
       if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
-      this.handleEncoderError(); 
+      this.handleEncoderError();
       this.lastPendingReset = now;
     }
 
@@ -647,7 +633,7 @@ export class AdaptiveH264Engine {
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
 
-      const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
+      const maxWsBuffer = Math.max(100000, (this.targetBitrate / 8) * 1.5);
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
         this.droppedFramesWindow++;
@@ -706,15 +692,15 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    
+
     // Снижаем максимальный Burst (залп) до 30-40 мс (что примерно равно 1 кадру при 24 fps).
     // Это сделает отправку по сети максимально "ровной" струйкой.
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
-    
+
     // Убираем множитель 1.8, если очередь большая. Он заставлял Pacer паниковать 
     // и заливать сеть трафиком именно тогда, когда сеть УЖЕ тормозила.
-    const multiplier = this.sendQueue.length > 10 ? 1.2 : 1.0; 
-    
+    const multiplier = this.sendQueue.length > 10 ? 1.2 : 1.0;
+
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
