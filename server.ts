@@ -62,12 +62,9 @@ async function startServer() {
   });
 
   wss.on('connection', (ws, request) => {
-    // Увеличиваем буферы отправки и получения для потокового видео
     const socket = (ws as any)._socket;
-    if (socket) {
-      socket.setSendBufferSize(2 * 1024 * 1024); // 2 MB
-      socket.setRecvBufferSize(2 * 1024 * 1024); // 2 MB
-      console.log(`Socket buffers enlarged for ${request.socket.remoteAddress}`);
+    if (socket && typeof socket.setNoDelay === 'function') {
+      socket.setNoDelay(true); // Disable Nagle's algorithm for lower latency
     }
 
     const urlParams = new URLSearchParams(request.url?.split('?')[1] || '');
