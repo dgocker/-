@@ -148,6 +148,8 @@ export class AdaptiveH264Engine {
   private manualMode: boolean = false;
   private manualBitrate: number = 500_000;
   private lastAbrBitrate: number = 500_000;
+  private lastBufferedAmount: number = 0;
+  private bufferedGradient: number = 0;
 
   // PI Controller for RTT-based adaptation
   private rttTarget = 150; // target RTT in ms
@@ -327,62 +329,75 @@ export class AdaptiveH264Engine {
   }
 
   private updateCongestionControl() {
-    if (this.manualMode) return;
+    if (this.manualMode) return; 
 
     const now = performance.now();
     const metrics = this.getNetworkMetrics();
     const buffered = metrics.bufferedAmount;
-    const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
+    
+    // Calculate buffered gradient (derivative)
+    const dt = Math.max(1, now - this.lastCongestionUpdate);
+    if (dt > 100) {
+      const currentGradient = (buffered - this.lastBufferedAmount) / dt;
+      this.bufferedGradient = this.bufferedGradient * 0.8 + currentGradient * 0.2;
+      this.lastBufferedAmount = buffered;
+      this.lastCongestionUpdate = now;
+    }
 
+    const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
+    
+    // Proactive Bitrate Penalty based on buffer pressure
+    const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
+    const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
+    if (bufferPressure > 0.3) {
+        const penalty = (bufferPressure - 0.3) * 0.6; 
+        this.targetBitrate *= (1.0 - penalty);
+        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate);
+    }
+    
     let stateChanged = false;
     const oldBitrate = this.targetBitrate;
 
-    // GCC Overuse Detection
-    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || queueDelay > 180 || buffered > 400000;
-
+    const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 100000;
+    const isOveruse = this.delayTrend > 10 || isBufferGrowing || queueDelay > 600; 
+    
     if (isOveruse) {
       if (this.aiState !== 'congested') {
-        this.aiState = 'congested';
-        // Attempt 7: Panic Bitrate Cut 50%
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
-        stateChanged = true;
-        if (this.onLog) this.onLog(`🚨 GCC Overuse: trend=${this.delayTrend.toFixed(1)}, qDelay=${Math.round(queueDelay)}ms, cutting to ${Math.round(this.targetBitrate / 1024)}k`);
+         this.aiState = 'congested';
+         const cutFactor = this.lastSmoothedRtt > 1000 ? 0.7 : 0.9;
+         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
+         stateChanged = true;
       }
     } else {
-      // Recovery or Steady
       if (this.aiState === 'congested') {
         this.aiState = 'recovery';
         stateChanged = true;
       }
 
       if (this.aiState === 'recovery') {
-        // Attempt 7: Multiplicative Recovery (8% + fixed 10k)
-        this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * 1.08 + 10000);
-        if (this.targetBitrate >= oldBitrate * 1.15) { // Exit recovery with larger margin
-          this.aiState = 'steady';
+        const recoveryFactor = this.lastSmoothedRtt < 250 ? 1.15 : 1.08; 
+        this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * recoveryFactor + 100000); 
+        if (this.targetBitrate >= oldBitrate * 1.1 || this.lastSmoothedRtt < 150) { 
+           this.aiState = 'steady';
         }
       } else if (this.aiState === 'steady') {
-        // Attempt 7: Aggressive steady growth (25kbps every 400ms)
-        if (now - this.lastSteadyIncrease > 400) {
-          const rtt = this.getNetworkMetrics().rtt;
-          const growth = rtt < 150 ? 25000 : 15000; // Attempt 6: Faster growth on low RTT
-          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + growth);
+        if (now - this.lastSteadyIncrease > 300) { 
+          const growthFactor = this.lastSmoothedRtt < 150 ? 1.10 : 1.05; 
+          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * growthFactor + 10000);
           this.lastSteadyIncrease = now;
         }
 
-        // Attempt 6: Frequent Probing (8s)
-        if (!this.isProbing && now - this.probingStartTs > 8000) {
+        if (!this.isProbing && now - this.probingStartTs > 12000) { 
           this.isProbing = true;
           this.probingStartTs = now;
-          if (this.onLog) this.onLog(`🔍 Probing network capacity (3.5x)...`);
         }
 
         if (this.isProbing) {
           if (now - this.probingStartTs < 250) {
-            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 3.5);
+            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 2.0); 
           } else {
             this.isProbing = false;
-            this.probingStartTs = now; // Reset timer
+            this.probingStartTs = now; 
           }
         }
       }
@@ -397,10 +412,14 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.lastRtt = rtt;
 
-    // === NEW PROTECTION AGAINST ZOMBIE RTT (SPIKES) ===
-    if (rtt > 2000) { // > 2s is likely a buffer artifact, not real network delay
-      if (this.onLog) this.onLog(`🚨 EXTREME RTT SPIKE ${rtt}ms — resetting history`);
-      this.rttHistory = [this.lastSmoothedRtt || 150]; // return to last normal
+    if (rtt > 500 && this.bufferedGradient > 0) { 
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
+      this.sendQueue = []; 
+      this.applyBitrateToParams();
+      this.rttHistory = [this.lastSmoothedRtt || 200]; 
+      return;
+    } else if (rtt > 500) {
+      this.rttHistory = [this.lastSmoothedRtt || 200]; 
       return;
     }
 
@@ -557,13 +576,27 @@ export class AdaptiveH264Engine {
 
     const frameInterval = 1000 / this.currentFps;
     if (now - this.lastFrameTime >= frameInterval) {
+      // ИСПРАВЛЕНИЕ rAF
+      if (now - this.lastFrameTime > frameInterval * 2) {
+        this.lastFrameTime = now;
+      } else {
+        this.lastFrameTime += frameInterval;
+      }
+
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
-      // Attempt 9: Increased Internal Queue Panic (60 frames)
-      const isInternalQueuePanic = this.sendQueue.length > 60 || queueBytes > 512000;
+      const isInternalQueuePanic = this.sendQueue.length > 80 || queueBytes > 2048000;
 
-      // resolution scaling
-      this.currentScale = 1.0;
+      // ИСПРАВЛЕНИЕ: Resolution scaling based on RTT
+      if (this.lastSmoothedRtt > 1500) {
+        this.currentScale = 0.3;
+      } else if (this.lastSmoothedRtt > 800) {
+        this.currentScale = 0.5;
+      } else if (this.lastSmoothedRtt > 400) {
+        this.currentScale = 0.75;
+      } else {
+        this.currentScale = 1.0;
+      }
 
       const possessesTokens = this.tokenBucketBytes >= 0; // Task 17: Credit-based (allow until 0)
 

@@ -129,13 +129,11 @@ export class H264Decoder {
         const sorted = [...this.jitterLog].sort((a, b) => a - b);
         const p95 = sorted[Math.floor(sorted.length * 0.95)];
 
-        // Attempt 10: Smooth Target Delay (0.9 old + 0.1 new)
-        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * 1.3)));
-        this.targetDelay = this.targetDelay * 0.9 + newTarget * 0.1;
-
-        if (this.onLog && Math.abs(newTarget - this.targetDelay) > 100) {
-          this.onLog(`📊 Smoothing targetDelay to ${Math.round(this.targetDelay)}ms (p95=${Math.round(p95)}ms, RTT=${Math.round(this.currentRtt)}ms)`);
-        }
+        const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
+        const MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 80;
+        
+        const newTarget = Math.min(800, Math.max(MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
+        this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
       }
     }
 
@@ -145,21 +143,6 @@ export class H264Decoder {
     const packet: VideoPacket = { frameId, receiveTime: now, senderTs, raw: binary, type };
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
-
-    // Attempt 8/9: Fast Recovery (Instant Unfreeze)
-    // If the jitter buffer exceeds 1s of video, skip to the latest keyframe.
-    if (this.jitterBuffer.length > 0) {
-      const bufferDuration = this.jitterBuffer[this.jitterBuffer.length - 1].senderTs - this.jitterBuffer[0].senderTs;
-      if (bufferDuration > 1000) {
-        const lastKeyIdx = this.jitterBuffer.map(p => p.type).lastIndexOf('key');
-        if (lastKeyIdx > 0) {
-          if (this.onLog) this.onLog(`🚀 FAST RECOVERY: Skipping to latest keyframe`);
-          if (this.onRequestKeyframe) this.onRequestKeyframe(true);
-          this.jitterBuffer = this.jitterBuffer.slice(lastKeyIdx);
-          this.firstSenderTs = -1; // Reset sync
-        }
-      }
-    }
 
     if (!this.isPlaying && this.jitterBuffer.length >= 1) { // Trigger immediately if any frame
       this.isPlaying = true;
@@ -201,6 +184,26 @@ export class H264Decoder {
     }
 
     const packet = this.jitterBuffer[0];
+    
+    // Fast Recovery: Если буфер слишком большой, прыгаем до свежего keyframe
+    const bufferDuration = this.jitterBuffer.length * (1000 / 30);
+    if (bufferDuration > 1000) {
+      let latestKeyIdx = -1;
+      for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
+        if (this.jitterBuffer[i].type === 'key') {
+          latestKeyIdx = i;
+          break;
+        }
+      }
+      
+      if (latestKeyIdx > 0) {
+        if (this.onRequestKeyframe) this.onRequestKeyframe(true);
+        this.jitterBuffer.splice(0, latestKeyIdx);
+        this.firstSenderTs = -1;
+        requestAnimationFrame(this.playNext);
+        return;
+      }
+    }
 
     if (this.firstSenderTs === -1) {
       if (packet.type !== 'key') {
@@ -291,7 +294,7 @@ export class H264Decoder {
       this.rttHistory = [median];
     }
 
-    const clamped = Math.min(median, 800);
+    const clamped = Math.min(median, 5000);
     this.lastRttSmoothed = this.lastRttSmoothed
       ? this.lastRttSmoothed * 0.7 + clamped * 0.3
       : clamped;
