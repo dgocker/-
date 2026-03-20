@@ -605,8 +605,6 @@ export class AdaptiveH264Engine {
 
   public forceKeyframe() {
     this.needsKeyframe = true;
-    this.lastPendingReset = performance.now(); // Phase 4: Reset watchdog on manual forced keyframe
-    this.pendingFrames = 0; // Phase 4: Clear pending count to prevent stall loops
   }
 
   private loop = async (now: number) => {
@@ -758,8 +756,8 @@ export class AdaptiveH264Engine {
     }
     
     if (this.pendingFrames > 3 || this.video.paused || this.video.ended || this.video.readyState < 2) {
-      if (this.onLog && this.frameId % 60 === 0) {
-         this.onLog(`⚠️ processFrame skipped: pending=${this.pendingFrames}, paused=${this.video.paused}, ended=${this.video.ended}, readyState=${this.video.readyState}`);
+      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 3) {
+         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
       }
       return false;
     }

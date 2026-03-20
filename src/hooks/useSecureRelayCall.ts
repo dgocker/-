@@ -406,8 +406,10 @@ export function useSecureRelayCall(
       const id = ++decryptOpIdRef.current;
       pendingDecryptOpsRef.current.set(id, { resolve, reject });
       
-      const payload = data.buffer;
-      const ivBuffer = iv.buffer;
+      // === Phase 4 Fix: Clone buffers to avoid DataCloneError/Detached issues ===
+      const payload = new Uint8Array(data).buffer;
+      const ivBuffer = new Uint8Array(iv).buffer;
+      
       decryptWorkerRef.current.postMessage({
         type: 'DECRYPT_VIDEO',
         payload: payload,
@@ -733,7 +735,8 @@ export function useSecureRelayCall(
   const connectToRelay = (roomId: string, roomToken: string, sharedSecret: CryptoKey | null, retryCount: number = 0) => {
     if (sharedSecret && decryptWorkerRef.current) {
         crypto.subtle.exportKey('raw', sharedSecret).then(raw => {
-          decryptWorkerRef.current?.postMessage({ type: 'INIT_KEY', keyData: raw }, [raw]);
+          // --- Phase 4 Fix: Don't transfer keyData (copy for reliability) ---
+          decryptWorkerRef.current?.postMessage({ type: 'INIT_KEY', keyData: raw });
         }).catch(err => addLog(`❌ Failed to export secret for worker: ${err}`));
     }
     isCleanedUpRef.current = false;
