@@ -30,6 +30,7 @@ export class AdaptiveH264Engine {
   private pendingFrames: number = 0;
   private rafId: number | null = null;
   private errorCount: number = 0;
+  private watchdogCount: number = 0;
   private isRecovering: boolean = false;
   private pacerInterval: any = null;
   
@@ -344,6 +345,7 @@ export class AdaptiveH264Engine {
       // Give 40KB boost for the first I-frame to pass through the pacer instantly
       this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000); 
 
+      this.watchdogCount = 0;
       if (this.onLog) this.onLog(`\u2699\uFE0F Baseline Profile Config: ${width}x${height} @ ${Math.round(this.targetBitrate/1024)}k`);
     } catch (e) {
       if (this.onLog) this.onLog(`\u274C Encoder configuration failed: ${e}`);
@@ -669,9 +671,16 @@ export class AdaptiveH264Engine {
     }
     
     // === Phase 3: Encoder Watchdog ===
-    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) { 
-      if (this.onLog) this.onLog(`\uD83D\uDEA8 Watchdog: Encoder stuck for 1.5s. Force resetting...`);
-      this.handleEncoderError(); 
+    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) {
+      this.watchdogCount = (this.watchdogCount || 0) + 1;
+      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck for 1.5s (count=${this.watchdogCount}). Force resetting...`);
+      
+      if (this.watchdogCount > 3 && this.currentScale > 0.4) {
+        this.currentScale *= 0.7; // Aggressive downscale on repeated hangs
+        if (this.onLog) this.onLog(`📉 Watchdog: Downscaling to ${this.currentScale.toFixed(2)}x to reduce load`);
+      }
+      
+      this.handleEncoderError();
       this.lastPendingReset = now;
     }
 
@@ -769,6 +778,11 @@ export class AdaptiveH264Engine {
     if (this.pacerTokens < maxDebt) {
       this.pacerTokens = maxDebt;
     }
+
+    // Start-up boost: if queue is empty, keep tokens at 50% max burst
+    if (this.sendQueue.length === 0 && this.pacerTokens < maxPacerBurst * 0.5) {
+      this.pacerTokens = maxPacerBurst * 0.5;
+    }
     
     let bytesSentThisTick = 0;
     const MAX_BYTES_PER_TICK = this.getMaxBytesPerTick();
@@ -795,6 +809,7 @@ export class AdaptiveH264Engine {
   }
   
   private async processFrame(now: number): Promise<boolean> {
+    if (this.isRecovering) return false;
     if (this.onLog && this.frameId % 300 === 0) {
       this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }

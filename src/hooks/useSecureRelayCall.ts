@@ -65,6 +65,7 @@ export function useSecureRelayCall(
   const mySidRef = useRef<string>(Math.random().toString(36).substring(7));
   const isCleanedUpRef = useRef(false);
   const orientationListenerRef = useRef<(() => void) | null>(null);
+  const loopbackStreamRef = useRef<MediaStream | null>(null);
 
 
   const startPing = (ws: WebSocket) => {
@@ -1046,6 +1047,12 @@ export function useSecureRelayCall(
                 h264DecoderRef.current.setFlipV(remoteFlipV);
               }
               if (h264DecoderRef.current) {
+                // Task 18: Canvas Loopback for UI
+                if (remoteCanvasRef.current && (remoteCanvasRef.current as any).captureStream && !loopbackStreamRef.current) {
+                  const loopback = (remoteCanvasRef.current as any).captureStream(24);
+                  loopbackStreamRef.current = loopback;
+                  setRemoteStream(loopback);
+                }
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
                 // @ts-ignore
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
@@ -1116,6 +1123,12 @@ export function useSecureRelayCall(
                 h264DecoderRef.current.setFlipV(remoteFlipV);
               }
               if (h264DecoderRef.current) {
+                // Task 18: Canvas Loopback for UI
+                if (remoteCanvasRef.current && (remoteCanvasRef.current as any).captureStream && !loopbackStreamRef.current) {
+                  const loopback = (remoteCanvasRef.current as any).captureStream(24);
+                  loopbackStreamRef.current = loopback;
+                  setRemoteStream(loopback);
+                }
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
                 // @ts-ignore
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
