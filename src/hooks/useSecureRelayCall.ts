@@ -30,7 +30,17 @@ export function useSecureRelayCall(
   const decryptOpIdRef = useRef(0);
   const decryptWorkerReadyRef = useRef<boolean>(false);
   const rttRef = useRef<number>(0);
-  const [isFallbackMode, setIsFallbackMode] = useState<boolean>(false);
+  const canRecordWebM = typeof MediaRecorder !== 'undefined' && 
+    (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+     MediaRecorder.isTypeSupported('video/webm; codecs=vp8') || 
+     MediaRecorder.isTypeSupported('video/webm'));
+  const canPlayWebM = typeof window.MediaSource !== 'undefined' && 
+    (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || 
+     MediaSource.isTypeSupported('video/webm; codecs=vp8') || 
+     MediaSource.isTypeSupported('video/webm'));
+  const mySupportsWebM = canRecordWebM && canPlayWebM;
+
+  const [isFallbackMode, setIsFallbackMode] = useState<boolean>(!mySupportsWebM);
   const remoteCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const h264DecoderRef = useRef<H264Decoder | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -41,7 +51,7 @@ export function useSecureRelayCall(
   const currentRoomIdRef = useRef<string | null>(null);
   const currentRoomTokenRef = useRef<string | null>(null);
   const remoteSupportsWebMRef = useRef<boolean>(false); // Task 14: Safe default
-  const mySupportsWebMRef = useRef<boolean>(false);
+  const mySupportsWebMRef = useRef<boolean>(mySupportsWebM);
   const obfBufferRef = useRef<{ [frameId: number]: Uint8Array[] }>({});
   const sharedSecretRef = useRef<CryptoKey | null>(null);
   
@@ -731,6 +741,9 @@ export function useSecureRelayCall(
     console.log('Remote supports WebM:', supports);
     addLog(`ℹ️ Remote supports WebM: ${supports}`);
     
+    // Update fallback mode state immediately
+    setIsFallbackMode(!supports || !mySupportsWebMRef.current);
+    
     if (changed && connectionState === 'connected') {
       addLog('🚀 Remote WebM support changed, restarting recording...');
       startRecording();
@@ -855,12 +868,15 @@ export function useSecureRelayCall(
       }
     };
 
-    const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
-    // Skip MediaSource entirely if we are using custom H.264/PCM mode
-    const isMediaSourceSupported = !isFallbackMode && (typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined');
-    let isMediaSourceFailed = isFallbackMode;
+    const isFallbackModeLocal = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
+    // Sync state variable for UI
+    setIsFallbackMode(isFallbackModeLocal);
     
-    if (isFallbackMode) {
+    // Skip MediaSource entirely if we are using custom H.264/PCM mode
+    const isMediaSourceSupported = !isFallbackModeLocal && (typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined');
+    let isMediaSourceFailed = isFallbackModeLocal;
+    
+    if (isFallbackModeLocal) {
       addLog(`ℹ️ MediaSource skipped in Secure Relay (H.264/PCM) mode`);
     } else {
       addLog(`ℹ️ MediaSource support: ${isMediaSourceSupported ? (window.MediaSource ? 'Standard' : 'Managed') : 'None'}`);
