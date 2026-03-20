@@ -435,7 +435,7 @@ export class AdaptiveH264Engine {
     const medianRtt = sorted[Math.floor(sorted.length / 2)];
 
     // Hard Cap for the median used in GCC calculations
-    const clampedRtt = Math.min(medianRtt, 800);
+    const clampedRtt = Math.min(medianRtt, 5000);
 
     // Smoothed RTT (EMA with 0.7/0.3 weight to filter spikes)
     // Attempt 6: Asymmetric RTT Smoothing (EMA)
@@ -579,6 +579,13 @@ export class AdaptiveH264Engine {
       this.lastTokenUpdate = now;
     }
 
+    // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
+    if (this.pendingFrames > 0 && now - this.lastEncodeTs > 1500) { 
+      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck. Force resetting encoder...`);
+      this.handleEncoderError(); 
+      this.lastEncodeTs = now;
+    }
+
     const frameInterval = 1000 / this.currentFps;
     if (now - this.lastFrameTime >= frameInterval) {
       // ИСПРАВЛЕНИЕ rAF
@@ -719,7 +726,7 @@ export class AdaptiveH264Engine {
       }
 
       // Task 17: Don't force keyframe if congested (saves bits)
-      if (this.frameId % 60 === 0 && this.aiState !== 'congested') {
+      if (this.frameId % 90 === 0 && this.aiState !== 'congested') {
         this.needsKeyframe = true;
       }
 

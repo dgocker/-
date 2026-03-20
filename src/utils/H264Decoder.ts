@@ -172,18 +172,8 @@ export class H264Decoder {
         this.isPlaying = false;
         if (this.onLog) this.onLog(`\u26A0\uFE0F Buffer empty, stopping playback`);
         this.lastBufferEmptyTime = now;
-      } else {
-        if (this.lastBufferEmptyTime > 0 && now - this.lastBufferEmptyTime > 3000) {
-          if (this.onLog) {
-            this.onLog(`🔄 Buffer empty for 3s, resetting sync (firstSenderTs=${this.firstSenderTs}, firstPlayoutTime=${Math.round(this.firstPlayoutTime)})`);
-          }
-          this.firstSenderTs = -1;
-          this.firstPlayoutTime = -1;
-          this.lastBufferEmptyTime = 0;
-        }
       }
-      requestAnimationFrame(this.playNext);
-      return;
+      return; // Выходим молча, pushPacket сам вызовет requestAnimationFrame, когда придут данные
     }
 
     if (!this.isPlaying) {
@@ -271,12 +261,6 @@ export class H264Decoder {
 
   public setRotation(degrees: number) {
     this.rotation = degrees % 360;
-
-    // iPhone front camera mirror + extra 180° compensation
-    if (/iPhone|iPad/.test(navigator.userAgent)) {
-      this.mirror = true;           // front camera is always mirrored
-      this.rotation = (this.rotation + 180) % 360;
-    }
 
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.onLog) this.onLog(`🔄 Applied rotation: ${this.rotation}° (mirror=${this.mirror})`);

@@ -776,8 +776,12 @@ export function useSecureRelayCall(
           }
         } catch (e) { }
       } else if (event.data instanceof ArrayBuffer) {
-        bytesReceivedRef.current += event.data.byteLength;
-        const part = new Uint8Array(event.data);
+        const view = new Uint8Array(event.data);
+        const senderIdLength = view[0];
+        const originalData = event.data.slice(1 + senderIdLength); // Отрезаем Sender ID
+
+        bytesReceivedRef.current += originalData.byteLength;
+        const part = new Uint8Array(originalData);
 
         if (part[0] === 1 || part[0] === 3) {
           try {
@@ -835,8 +839,12 @@ export function useSecureRelayCall(
         }
       } else if (event.data instanceof Blob) {
         const arrayBuffer = await (event.data as Blob).arrayBuffer();
-        bytesReceivedRef.current += arrayBuffer.byteLength;
-        const part = new Uint8Array(arrayBuffer);
+        const view = new Uint8Array(arrayBuffer);
+        const senderIdLength = view[0];
+        const originalData = arrayBuffer.slice(1 + senderIdLength); // Отрезаем Sender ID
+
+        bytesReceivedRef.current += originalData.byteLength;
+        const part = new Uint8Array(originalData);
 
         if (part[0] === 1 || part[0] === 3) {
           try {
