@@ -8,7 +8,7 @@
 export async function generateECDHKeyPair(): Promise<CryptoKeyPair> {
   return await window.crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
-    false, // Private key should never be extractable
+    true, // Private key must be extractable
     ['deriveKey', 'deriveBits']
   );
 }
@@ -47,7 +47,7 @@ export async function deriveAESKey(privateKey: CryptoKey, publicKey: CryptoKey):
     { name: 'ECDH', public: publicKey },
     privateKey,
     { name: 'AES-GCM', length: 256 },
-    false, // Shared AES key must remain locked in memory (non-extractable)
+    true, // Shared AES key must be extractable to be used in Web Workers
     ['encrypt', 'decrypt']
   );
 }

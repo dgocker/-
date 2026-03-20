@@ -501,6 +501,7 @@ export function useSecureRelayCall(
       fallbackVideoRef.current = document.createElement('video');
       fallbackVideoRef.current.muted = true;
       fallbackVideoRef.current.playsInline = true;
+      fallbackVideoRef.current.autoplay = true;
       // Use absolute positioning instead of display: none to prevent browsers (like iOS Safari) from pausing the video
       fallbackVideoRef.current.style.position = 'absolute';
       fallbackVideoRef.current.style.width = '1px';

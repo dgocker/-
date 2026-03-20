@@ -12,10 +12,16 @@ const pendingCryptoOps = new Map<number, {
 }>();
 let cryptoOpId = 0;
 
+let cryptoWorkerInitPromise: Promise<void> | null = null;
+
 function initCryptoWorker(): Promise<void> {
-  return new Promise((resolve, reject) => {
+  if (cryptoWorkerInitPromise) return cryptoWorkerInitPromise;
+
+  cryptoWorkerInitPromise = new Promise((resolve, reject) => {
     try {
-      cryptoWorker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
+      if (!cryptoWorker) {
+        cryptoWorker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
+      }
 
       cryptoWorker.onmessage = (event) => {
         const { type, id, error } = event.data;
@@ -47,6 +53,7 @@ function initCryptoWorker(): Promise<void> {
       resolve();
     }
   });
+  return cryptoWorkerInitPromise;
 }
 
 async function encryptInWorker(key: CryptoKey, data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> {
@@ -281,9 +288,11 @@ export class AdaptiveH264Engine {
       this.isConfigured = true;
       this.needsKeyframe = true;
 
-      // Attempt 9: Sender Queue Flush & Token Boost
-      this.sendQueue = [];
-      this.tokenBucketBytes += 40960; // 40KB boost for initial I-frame
+      // ДОБАВИТЬ СБРОС СТАРЫХ КАДРОВ:
+      if (this.sendQueue.length > 0) {
+        this.sendQueue = [];
+      }
+      this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000);
 
       if (this.onLog) this.onLog(`⚙️ Baseline Config: ${width}x${height} @ ${Math.round(this.targetBitrate / 1024)}k (Queue Flush + Boost)`);
     } catch (e) {
@@ -535,8 +544,14 @@ export class AdaptiveH264Engine {
     const timeDeltaMs = now - this.lastTokenUpdate;
     if (timeDeltaMs > 0) {
       const tokensToAdd = (this.targetBitrate / 8) * (timeDeltaMs / 1000);
-      const maxBurst = (this.targetBitrate / 8) * 2.0;
+      const maxBurst = (this.targetBitrate / 8) * 1.5;
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
+      
+      // ВОЗВРАЩАЕМ ПРОЩЕНИЕ ДОЛГА ИЗ ТЕСТА:
+      const maxDebt = -this.targetBitrate / 40; 
+      if (this.tokenBucketBytes < maxDebt) {
+        this.tokenBucketBytes = maxDebt;
+      }
       this.lastTokenUpdate = now;
     }
 
@@ -612,8 +627,9 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(1500, bytesPerMs * 250); // 250ms burst
-    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * 1.8) * pacerDeltaMs);
+    const maxPacerBurst = Math.max(5000, bytesPerMs * 100); 
+    const multiplier = this.sendQueue.length > 10 ? 1.8 : 1.1; // ВОЗВРАЩАЕМ ПЛАВНОСТЬ
+    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
     const MAX_BYTES_PER_TICK = 131072;
