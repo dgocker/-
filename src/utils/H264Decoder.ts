@@ -157,7 +157,7 @@ export class H264Decoder {
     if (!this.isPlaying && this.jitterBuffer.length >= 1) {
       this.isPlaying = true;
       
-      // Check if there was a long gap
+      // ✅ КРИТИЧЕСКИ ВАЖНО: Восстановление после микро-разрывов (gap > 3s)
       if (this.lastBufferEmptyTime > 0 && now - this.lastBufferEmptyTime > 3000) {
         if (this.onLog) {
           this.onLog(`🔄 Buffer empty for >3s, resetting sync (firstSenderTs=${this.firstSenderTs})`);

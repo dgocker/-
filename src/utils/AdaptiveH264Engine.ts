@@ -625,11 +625,7 @@ export class AdaptiveH264Engine {
             this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, wsBuf=${Math.round(bufferedAmount / 1024)}KB, soft reset!`);
           }
           this.sendQueue = [];
-
-          // Attempt 7: Softened Congestion Panic (20KB reserve)
           this.tokenBucketBytes = 20000;
-
-          // Attempt 7: Panic Bitrate Cut
           this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
           this.applyBitrateToParams();
           this.aiState = 'congested';
@@ -640,7 +636,7 @@ export class AdaptiveH264Engine {
         if (success) {
           this.framesProcessedThisSecond++;
           this.droppedFramesConsecutive = 0;
-          this.lastPendingReset = now; // Activity detected
+          this.lastPendingReset = now; // ✅ КРИТИЧЕСКИ ВАЖНО: сброс таймера зависания
         }
       }
     }

@@ -772,7 +772,6 @@ export function useSecureRelayCall(
             }
             return;
           }
-          // ДОБАВИТЬ ВОТ ЭТОТ БЛОК:
           if (msg.type === 'requestKeyframe') {
             if (adaptiveEngineRef.current) {
               adaptiveEngineRef.current.forceKeyframe();
