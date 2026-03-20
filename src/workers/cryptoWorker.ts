@@ -18,7 +18,7 @@ self.onmessage = async (event) => {
       );
       cryptoKey = keyMaterial;
       self.postMessage({ type: 'KEY_READY' });
-    } 
+    }
     else if (type === 'CLEAR_KEY') {
       cryptoKey = null;
       self.postMessage({ type: 'KEY_CLEARED' });
@@ -29,7 +29,6 @@ self.onmessage = async (event) => {
         return;
       }
 
-      // Конвертируем ArrayBuffer обратно в Uint8Array если нужно
       const dataArray = payload instanceof ArrayBuffer ? new Uint8Array(payload) : payload;
       const ivArray = iv instanceof ArrayBuffer ? new Uint8Array(iv) : iv;
 
@@ -43,32 +42,37 @@ self.onmessage = async (event) => {
         cryptoKey,
         dataArray
       );
+
+      // ВОТ ЭТА ЧАСТЬ БЫЛА УПУЩЕНА В ОСНОВНОМ ПРИЛОЖЕНИИ
+      // Pack as: [12 bytes IV] + [Ciphertext + AuthTag]
+      const result = new Uint8Array(12 + encryptedBuffer.byteLength);
+      result.set(ivArray, 0);
+      result.set(new Uint8Array(encryptedBuffer), 12);
+
       const duration = performance.now() - startTime;
       if (duration > 5) {
         console.warn(`[CryptoWorker] Slow encryption: ${duration.toFixed(2)}ms for ${dataArray.byteLength} bytes`);
       }
 
       const messageType = type === 'ENCRYPT_VIDEO' ? 'ENCRYPTED_VIDEO' : 'ENCRYPTED_AUDIO';
-      
-      // Отправляем обратно в главный поток готовый пакет
+
       (self as any).postMessage(
-        { 
-          type: messageType, 
-          data: encryptedBuffer,
-          iv: ivArray,
+        {
+          type: messageType,
+          data: result.buffer, // Отправляем склеенный буфер
           id: id
         },
-        [encryptedBuffer] // Transferable object (zero copy)
+        [result.buffer]
       );
     }
   } catch (error) {
     console.error('[CryptoWorker] Error:', error);
-    self.postMessage({ 
-      type: 'ERROR', 
+    self.postMessage({
+      type: 'ERROR',
       error: error instanceof Error ? error.message : String(error),
       id: id
     });
   }
 };
 
-export {};
+export { };
