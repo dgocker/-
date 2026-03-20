@@ -196,52 +196,12 @@ export class AdaptiveH264Engine {
   private initEncoder() {
     try {
       this.encoder = new VideoEncoder({
-        output: async (chunk, metadata) => {
+        output: (chunk, metadata) => {
           const startTime = performance.now();
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          try {
-            let finalData: Uint8Array = data;
-            if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
-
-            // Attempt 4: Stricter Frame Limiter (100KB)
-            if (data.length > 250000) {
-              if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length / 1024)}KB). Dropping to prevent buffer bloat.`);
-              this.needsKeyframe = true;
-              this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
-              this.applyBitrateToParams();
-              this.pendingFrames = Math.max(0, this.pendingFrames - 1);
-              return;
-            }
-
-            if (this.sharedSecret) {
-              const iv = crypto.getRandomValues(new Uint8Array(12));
-              finalData = await encryptInWorker(this.sharedSecret, data, iv).catch(err => {
-                return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
-              });
-            }
-
-            const senderTs = Math.floor(performance.now() - this.sessionStartTime);
-            const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
-            for (const part of parts) {
-              this.sendQueue.push({
-                data: new Uint8Array(part),
-                enqueueTime: performance.now()
-              });
-            }
-
-            // Attempt 7: Precise Token Tracking (Subtract actual encoded size)
-            this.tokenBucketBytes -= finalData.length;
-            this.lastEncodeTs = performance.now(); // Reset watchdog
-
-            this.encodeDurationLog.push(performance.now() - startTime);
-            if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
-
-          } catch (e) {
-            // 
-          } finally {
-            this.pendingFrames = Math.max(0, this.pendingFrames - 1);
-          }
+          // Делегируем в отдельный метод, чтобы не блокировать поток энкодера
+          this.processEncodedFrame(data, startTime);
         },
         error: (e) => {
           if (this.onLog) this.onLog(`❌ VideoEncoder error: ${e.message}`);
@@ -249,9 +209,54 @@ export class AdaptiveH264Engine {
         }
       });
     } catch (e) {
+      if (this.onLog) this.onLog(`❌ Encoder init exception: ${e}`);
       setTimeout(() => {
         if (this.isRunning && !this.encoder) this.initEncoder();
       }, 1000);
+    }
+  }
+
+  // === ДОБАВЛЯЕМ МЕТОД ИЗ ТЕСТА ===
+  private async processEncodedFrame(data: Uint8Array, startTime: number) {
+    if (data.length > 250000) {
+      if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length/1024)}KB). Dropping to prevent buffer bloat.`);
+      this.needsKeyframe = true;
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
+      this.applyBitrateToParams();
+      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+      return;
+    }
+
+    try {
+      let finalData: Uint8Array = data;
+      if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
+
+      this.tokenBucketBytes -= data.length;
+      this.lastEncodeTs = performance.now(); 
+
+      if (this.sharedSecret) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        finalData = await encryptInWorker(this.sharedSecret, data, iv).catch(err => {
+          return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
+        });
+      }
+    
+      const senderTs = Math.floor(performance.now() - this.sessionStartTime);
+      const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
+      for (const part of parts) {
+        this.sendQueue.push({
+          data: new Uint8Array(part),
+          enqueueTime: performance.now()
+        });
+      }
+      
+      this.encodeDurationLog.push(performance.now() - startTime);
+      if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
+      
+    } catch (e) {
+       if (this.onLog) this.onLog(`❌ VideoEncoder output processing error: ${e}`);
+    } finally {
+      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
     }
   }
 
@@ -280,7 +285,7 @@ export class AdaptiveH264Engine {
         width: width,
         height: height,
         bitrate: this.targetBitrate,
-        bitrateMode: 'constant',
+        bitrateMode: 'variable',
         latencyMode: "realtime",
         // @ts-ignore
         avc: { format: "annexb", key_frame_interval: 60 }
@@ -313,7 +318,7 @@ export class AdaptiveH264Engine {
           width: this.currentWidth,
           height: this.currentHeight,
           bitrate: this.targetBitrate,
-          bitrateMode: 'constant',
+          bitrateMode: 'variable',
           latencyMode: "realtime",
           // @ts-ignore
           avc: { format: "annexb", key_frame_interval: 60 }

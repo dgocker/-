@@ -118,6 +118,15 @@ export class H264Decoder {
     const now = performance.now();
     const type = this.isKeyFrame(binary) ? 'key' : 'delta';
 
+    // Automatic Keyframe Request: Если ждем I-Frame, но получаем дельту — просим ключевой кадр.
+    if (this.firstSenderTs === -1 && type === 'delta' && frameId % 30 === 0) {
+      if (this.onRequestKeyframe) this.onRequestKeyframe(false);
+    }
+
+    if (type === 'key' && this.onLog) {
+      this.onLog(`🔑 Keyframe detected: frameId=${frameId}, size=${binary.length}`);
+    }
+
     // Adaptive Jitter Logic (Jitter = variance in arrival time)
     if (this.lastSenderTs > 0) {
       const expectedArrive = this.lastReceiveTime + (senderTs - this.lastSenderTs);
