@@ -329,31 +329,32 @@ export function useSecureRelayCall(
 
     if (!(receiverAudioContextRef.current as any)._isLoopStarted) {
       (receiverAudioContextRef.current as any)._isLoopStarted = true;
+      let nextPlayTime = 0; // Добавляем переменную для плавной очереди
+
       const playLoop = () => {
         if (isCleanedUpRef.current) return;
 
-        if (audioJitterBufferRef.current.length > 0 && h264DecoderRef.current) {
+        const ctx = receiverAudioContextRef.current!;
+        if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
-          const stats = h264DecoderRef.current.getStats();
-          if (stats.firstPlayoutTime > 0) {
+          const stats = h264DecoderRef.current?.getStats();
+
+          if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
             const targetPlayTime = stats.firstPlayoutTime + videoOffset + stats.targetDelay;
             const now = performance.now();
 
-            if (now < targetPlayTime) {
+            if (now < targetPlayTime - 10) {
               setTimeout(playLoop, 10);
               return;
             }
-
-            // Catch-up: if audio is too old (>500ms), drop it
-            if (now - targetPlayTime > (h264DecoderRef.current?.getStats()?.dropThreshold || 500)) {
+            if (now - targetPlayTime > (stats.dropThreshold || 500)) {
               audioJitterBufferRef.current.shift();
               setTimeout(playLoop, 5);
               return;
             }
           }
 
-          const ctx = receiverAudioContextRef.current!;
           if (ctx.state === 'suspended') ctx.resume();
 
           const audioBuffer = ctx.createBuffer(1, packet.data.byteLength, SAMPLE_RATE);
@@ -366,11 +367,19 @@ export function useSecureRelayCall(
           source.buffer = audioBuffer;
           source.connect(ctx.destination);
 
-          // We use the AudioContext's currentTime for precise scheduling if possible, 
-          // but since we already waited for targetPlayTime in JS domain, playing immediately is fine.
-          source.start(0);
+          // Идеальное расписание из тестового приложения
+          const currentTime = ctx.currentTime;
+          if (nextPlayTime < currentTime) {
+            nextPlayTime = currentTime + 0.04;
+          }
+          source.start(nextPlayTime);
+          nextPlayTime += audioBuffer.duration;
 
           audioJitterBufferRef.current.shift();
+
+          const delay = audioJitterBufferRef.current.length > 10 ? 5 : 15;
+          setTimeout(playLoop, delay);
+          return;
         }
         setTimeout(playLoop, 20);
       };
@@ -776,7 +785,14 @@ export function useSecureRelayCall(
             return;
           }
           if (msg.type === 'rotation') {
-            // Attempt 8: Ignore automatic rotation to prevent double-rotation
+            return;
+          }
+          // ДОБАВИТЬ ВОТ ЭТОТ БЛОК:
+          if (msg.type === 'requestKeyframe') {
+            if (adaptiveEngineRef.current) {
+              adaptiveEngineRef.current.forceKeyframe();
+              addLog('🚀 Remote requested keyframe, forcing now');
+            }
             return;
           }
         } catch (e) { }
@@ -825,12 +841,12 @@ export function useSecureRelayCall(
               }
 
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
-              }
-              if (h264DecoderRef.current) {
-                const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
-                // @ts-ignore
-                h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe' }));
+                    if (isPanic) addLog('📡 PANIC: Sent requestKeyframe to peer');
+                  }
+                });
               }
 
               setIsFallbackMode(true);
@@ -882,12 +898,12 @@ export function useSecureRelayCall(
                 firstJpegReceivedRef.current = true;
               }
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
-              }
-              if (h264DecoderRef.current) {
-                const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
-                // @ts-ignore
-                h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe' }));
+                    if (isPanic) addLog('📡 PANIC: Sent requestKeyframe to peer');
+                  }
+                });
               }
 
               setIsFallbackMode(true);
