@@ -763,6 +763,13 @@ export class AdaptiveH264Engine {
     const effectiveRate = this.targetBitrate * multiplier;
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (effectiveRate / 8 / 1000) * pacerDeltaMs);
     
+    // Task 12: Debt Forgiveness
+    // Don't allow debt to exceed 200ms of target bitrate to avoid massive stalls
+    const maxDebt = -(this.targetBitrate / 8) * 0.2;
+    if (this.pacerTokens < maxDebt) {
+      this.pacerTokens = maxDebt;
+    }
+    
     let bytesSentThisTick = 0;
     const MAX_BYTES_PER_TICK = this.getMaxBytesPerTick();
 

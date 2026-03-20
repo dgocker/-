@@ -448,68 +448,77 @@ export function useSecureRelayCall(
 
     if (!(receiverAudioContextRef.current as any)._isLoopStarted) {
       (receiverAudioContextRef.current as any)._isLoopStarted = true;
-      let nextPlayTime = 0;
       
       const playLoop = () => {
         if (isCleanedUpRef.current) return;
         
         const ctx = receiverAudioContextRef.current!;
-        if (audioJitterBufferRef.current.length > 0) {
+        if (ctx.state === 'suspended') ctx.resume();
+
+        // Task 15: Adaptive Audio Drain
+        // Process multiple packets if they are already due, but cap at 5 to avoid blocking
+        let processedCount = 0;
+        while (audioJitterBufferRef.current.length > 0 && processedCount < 5) {
           const packet = audioJitterBufferRef.current[0];
           const stats = h264DecoderRef.current?.getStats();
-          
-          // Sync logic: only if video is active and synced
+          const now = performance.now();
+
           if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
             const targetPlayTime = stats.firstPlayoutTime + videoOffset + stats.targetDelay;
-            const now = performance.now();
 
-            // If we are too early, wait a bit
-            if (now < targetPlayTime - 10) {
+            if (now < targetPlayTime - 20) {
+              // Too early, wait
               setTimeout(playLoop, 10);
               return;
             }
             
-            // Catch-up: if audio is too old (>800ms), drop it
-            if (now - targetPlayTime > 800) {
+            if (now - targetPlayTime > 1000) {
+               // Too late, drop and continue immediately
                audioJitterBufferRef.current.shift();
-               setTimeout(playLoop, 5);
-               return;
+               continue;
             }
           }
-
-          if (ctx.state === 'suspended') ctx.resume();
-
-          const audioBuffer = ctx.createBuffer(1, packet.data.byteLength, SAMPLE_RATE);
-          const pcm8 = new Uint8Array(packet.data);
-          const f32 = new Float32Array(pcm8.length);
-          for (let i = 0; i < pcm8.length; i++) f32[i] = (pcm8[i] / 127.5) - 1.0;
-          audioBuffer.copyToChannel(f32, 0);
-
-          const source = ctx.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(ctx.destination);
-
-          // Precise scheduling using AudioContext.currentTime
-          const currentTime = ctx.currentTime;
-          if (nextPlayTime < currentTime) {
-            nextPlayTime = currentTime + 0.04; // 40ms safety buffer
-          }
           
-          source.start(nextPlayTime);
-          nextPlayTime += audioBuffer.duration;
-          
+          // If we reach here, the packet is due!
+          playSingleAudioPacket(packet.data);
           audioJitterBufferRef.current.shift();
-          
-          // If we have a large buffer, play next chunk sooner
-          const delay = audioJitterBufferRef.current.length > 10 ? 5 : 15;
-          setTimeout(playLoop, delay);
-          return;
+          processedCount++;
         }
-        setTimeout(playLoop, 20);
+        
+        setTimeout(playLoop, 5);
       };
+      
       playLoop();
     }
+  };
+
+  const playSingleAudioPacket = (data: ArrayBuffer | Uint8Array) => {
+    const ctx = receiverAudioContextRef.current!;
+    if (ctx.state === 'suspended') ctx.resume();
+    
+    const audioBuffer = ctx.createBuffer(1, data.byteLength, SAMPLE_RATE);
+    const pcm8 = new Uint8Array(data);
+    const f32 = new Float32Array(pcm8.length);
+    for (let i = 0; i < pcm8.length; i++) f32[i] = (pcm8[i] / 127.5) - 1.0;
+    audioBuffer.copyToChannel(f32, 0);
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+
+    // Precise scheduling using AudioContext.currentTime from a persistent ref
+    if (!(receiverAudioContextRef.current as any)._nextPlayTime) {
+      (receiverAudioContextRef.current as any)._nextPlayTime = ctx.currentTime + 0.05;
+    }
+    
+    let npt = (receiverAudioContextRef.current as any)._nextPlayTime;
+    if (npt < ctx.currentTime) {
+      npt = ctx.currentTime + 0.02; // 20ms safety if we slipped
+    }
+    
+    source.start(npt);
+    (receiverAudioContextRef.current as any)._nextPlayTime = npt + audioBuffer.duration;
   };
 
   const cleanupPCMAudio = () => {
@@ -643,9 +652,10 @@ export function useSecureRelayCall(
       fallbackVideoRef.current.playsInline = true;
       // Use absolute positioning instead of display: none to prevent browsers (like iOS Safari) from pausing the video
       fallbackVideoRef.current.style.position = 'absolute';
-      fallbackVideoRef.current.style.width = '1px';
-      fallbackVideoRef.current.style.height = '1px';
-      fallbackVideoRef.current.style.opacity = '0.01';
+      // Increased visibility to avoid browser throttling
+      fallbackVideoRef.current.style.width = '160px';
+      fallbackVideoRef.current.style.height = '90px';
+      fallbackVideoRef.current.style.opacity = '0.05';
       fallbackVideoRef.current.style.pointerEvents = 'none';
       fallbackVideoRef.current.style.zIndex = '-1';
       document.body.appendChild(fallbackVideoRef.current);
@@ -741,7 +751,6 @@ export function useSecureRelayCall(
       hash = ((hash << 5) - hash) + seed.charCodeAt(i);
       hash |= 0;
     }
-    
     const result = [];
     for (let i = 0; i < 4; i++) {
       const index = Math.abs((hash + i * 7) % emojiList.length);

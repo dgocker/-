@@ -58,6 +58,9 @@ export class H264Decoder {
     try {
       this.decoder = new VideoDecoder({
         output: (frame) => {
+          if (this.onLog && this.framesReceived % 60 === 0) {
+            this.onLog(`✅ Decoder output: ${frame.displayWidth}x${frame.displayHeight}, qSize=${this.decoder?.decodeQueueSize}`);
+          }
           try {
             // Always target portrait orientation
             const isLandscape = frame.displayWidth > frame.displayHeight;
@@ -85,7 +88,11 @@ export class H264Decoder {
             this.ctx.scale(this.mirror ? -1 : 1, this.flipV ? -1 : 1);
             
             // Draw centered
-            this.ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
+            try {
+              this.ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
+            } catch (drawError) {
+              if (this.onLog) this.onLog(`❌ drawImage Error: ${drawError}`);
+            }
             this.ctx.restore();
           } finally {
             frame.close();
