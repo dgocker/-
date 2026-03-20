@@ -542,28 +542,6 @@ export function useSecureRelayCall(
       );
     }
 
-    // === FINAL iPhone + Android rotation fix ===
-    let rotation = screen.orientation?.angle ?? 0;
-    let mirror = false;
-
-    if (/iPhone|iPad/.test(navigator.userAgent)) {
-      const track = activeStreamRef.current?.getVideoTracks()[0];
-      const facing = track?.getSettings().facingMode || 'user';
-      rotation = (facing === 'user' || facing === undefined) ? 270 : 90;
-      mirror = facing === 'user' || facing === undefined;
-      addLog(`📱 iPhone ${facing} camera → rotation ${rotation}°, mirror ${mirror}`);
-    } else if (/Android/.test(navigator.userAgent)) {
-      rotation = screen.orientation?.angle ?? (window.orientation as number) ?? 0;
-    }
-
-    if (h264DecoderRef.current) {
-      h264DecoderRef.current.setMirror(mirror);
-      h264DecoderRef.current.setRotation(rotation);
-    }
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'rotation', value: rotation, mirror, sid: mySidRef.current }));
-    }
 
     adaptiveEngineRef.current.start();
     addLog('🚀 Adaptive H.264 Engine started');
