@@ -763,6 +763,13 @@ export function useSecureRelayCall(
             return;
           }
           if (msg.type === 'rotation') {
+            const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
+            if (firstDecoder) {
+              firstDecoder.setRotation(msg.value);
+              if (msg.mirror !== undefined) {
+                firstDecoder.setMirror(msg.mirror);
+              }
+            }
             return;
           }
           // ДОБАВИТЬ ВОТ ЭТОТ БЛОК:
