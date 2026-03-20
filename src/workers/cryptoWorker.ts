@@ -59,14 +59,14 @@ self.onmessage = async (event) => {
           : (type === 'DECRYPT_VIDEO' ? 'DECRYPTED_VIDEO' : 'DECRYPTED_AUDIO');
         
         // Отправляем обратно в главный поток
-        (self as any).postMessage(
-          { 
-            type: responseType, 
-            data: resultBuffer,
-            id: id
-          },
-          [resultBuffer] // Transferable object (zero copy)
-        );
+        const response: any = { 
+          type: responseType, 
+          data: resultBuffer,
+          id: id
+        };
+        if (isEncrypt) response.iv = ivArray;
+
+        (self as any).postMessage(response, [resultBuffer]);
       } catch (e: any) {
         self.postMessage({ type: 'ERROR', error: `Crypto operation failed: ${e.message}`, id });
       }

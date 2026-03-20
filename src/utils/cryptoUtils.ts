@@ -58,7 +58,7 @@ export async function encryptData(sharedKey: CryptoKey, data: Uint8Array): Promi
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: iv },
     sharedKey,
-    data as Uint8Array // Type assertion to satisfy linter
+    data as any // Cast to any for browser compatibility
   );
   
   // Pack as: [12 bytes IV] + [Ciphertext + AuthTag]
@@ -75,7 +75,7 @@ export async function decryptData(sharedKey: CryptoKey, data: Uint8Array): Promi
   const decrypted = await window.crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: iv },
     sharedKey,
-    ciphertext as Uint8Array // Type assertion to satisfy linter
+    ciphertext as any // Cast to any for browser compatibility
   );
   return new Uint8Array(decrypted);
 }

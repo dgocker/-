@@ -151,18 +151,23 @@ export class AdaptiveH264Engine {
             const pending = this.pendingCryptoOps.get(id);
             if (pending) {
               this.pendingCryptoOps.delete(id);
-              const encrypted = new Uint8Array(event.data.data);
-              const iv = new Uint8Array(event.data.iv);
-              const result = new Uint8Array(iv.length + encrypted.length);
-              result.set(iv, 0);
-              result.set(encrypted, iv.length);
-              pending.resolve(result);
+              try {
+                const encrypted = new Uint8Array(event.data.data);
+                const iv = event.data.iv ? new Uint8Array(event.data.iv) : new Uint8Array(0);
+                const result = new Uint8Array(iv.length + encrypted.length);
+                if (iv.length > 0) result.set(iv, 0);
+                result.set(encrypted, iv.length);
+                pending.resolve(result);
+              } catch (e: any) {
+                pending.reject(e);
+              }
             }
           } else if (type === 'ERROR') {
+            if (this.onLog) this.onLog(`\u274C Crypto Worker Error: ${error}`);
             const pending = this.pendingCryptoOps.get(id);
             if (pending) {
               this.pendingCryptoOps.delete(id);
-              pending.reject(new Error(error));
+              pending.reject(new Error(error || 'Unknown worker error'));
             }
           }
         };
@@ -197,10 +202,24 @@ export class AdaptiveH264Engine {
     
     return new Promise((resolve, reject) => {
       const id = ++this.cryptoOpId;
-      this.pendingCryptoOps.set(id, { resolve, reject, data, frameId: 0 });
+      
+      // Fallback timeout: 500ms to avoid encoder hang
+      const timeoutId = setTimeout(() => {
+        if (this.pendingCryptoOps.has(id)) {
+           this.pendingCryptoOps.delete(id);
+           if (this.onLog && id % 300 === 0) this.onLog(`\u26A0\uFE0F Encryption Worker timeout (id=${id}), falling back to main thread`);
+           encryptData(key, data).then(resolve).catch(reject);
+        }
+      }, 500);
+
+      this.pendingCryptoOps.set(id, { 
+        resolve: (val: Uint8Array) => { clearTimeout(timeoutId); resolve(val); }, 
+        reject: (err: any) => { clearTimeout(timeoutId); reject(err); }, 
+        data, 
+        frameId: 0 
+      });
       
       try {
-        // Phase 4 Fix: Clone buffers to avoid DataCloneError/Detached issues
         const payload = new Uint8Array(data).buffer;
         const ivBuffer = new Uint8Array(iv).buffer;
         this.cryptoWorker!.postMessage({
@@ -210,6 +229,7 @@ export class AdaptiveH264Engine {
           id: id
         }, [payload, ivBuffer]);
       } catch (postError) {
+        clearTimeout(timeoutId);
         this.pendingCryptoOps.delete(id);
         reject(postError);
         return;
@@ -260,10 +280,15 @@ export class AdaptiveH264Engine {
             this.encodeDurationLog.push(performance.now() - startTime);
             if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
             
+            // Fixed: Subtract from token budget
+            this.tokenBucketBytes -= finalData.length;
+            this.pacerTokens -= finalData.length; // Keep them somewhat in sync
+            
           } catch (e) {
              // 
           } finally {
             this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+            this.lastPendingReset = performance.now();
           }
         },
         error: (e) => {
@@ -558,6 +583,7 @@ export class AdaptiveH264Engine {
     this.sendQueue = []; // Fix: Clear old queue
     this.totalQueueBytes = 0;
     this.tokenBucketBytes = (500_000 / 8) * 0.5; // Start with half second credit
+    this.pacerTokens = this.tokenBucketBytes; // Initialize pacer tokens too!
     this.cryptoOpId = 0; 
     
     if (this.sharedSecret) {

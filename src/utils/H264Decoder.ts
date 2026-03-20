@@ -222,7 +222,6 @@ export class H264Decoder {
           this.lastBufferEmptyTime = 0;
         }
       }
-      requestAnimationFrame(this.playNext);
       return;
     }
 
