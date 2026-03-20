@@ -1,3 +1,4 @@
+import './src/utils/logger.js';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { createServer } from 'http';
