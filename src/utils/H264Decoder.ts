@@ -143,6 +143,18 @@ export class H264Decoder {
     if (!this.isConfigured) this.configure();
 
     const now = performance.now();
+    
+    // Phase 4: Annex B Diagnostics
+    const hasStartCode = binary.length > 4 && 
+                         ((binary[0] === 0 && binary[1] === 0 && binary[2] === 1) || 
+                          (binary[0] === 0 && binary[1] === 0 && binary[2] === 0 && binary[3] === 1));
+                          
+    if (!hasStartCode) {
+      if (this.onLog && this.framesReceived % 30 === 0) {
+        this.onLog(`🚨 Decoder: Packet ${frameId} has NO Annex B start code! (size=${binary.length})`);
+      }
+    }
+
     const type = this.isKeyFrame(binary) ? 'key' : 'delta';
 
     // Auto-Keyframe on Join: Request keyframe if we get deltas before the first keyframe

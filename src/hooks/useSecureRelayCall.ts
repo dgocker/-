@@ -150,30 +150,30 @@ export function useSecureRelayCall(
 
     if (connectionState === 'connected') handler();
 
-    // Phase 3.2: Initialize Decryption Worker
     if (!decryptWorkerRef.current && typeof Worker !== 'undefined') {
        const worker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
        decryptWorkerRef.current = worker;
-        worker.onmessage = (e) => {
-          const { type, id, data, error } = e.data;
-          
-          if (type === 'KEY_READY') {
-            decryptWorkerReadyRef.current = true;
-            return;
-          }
-          if (type === 'KEY_CLEARED') {
-            decryptWorkerReadyRef.current = false;
-            return;
-          }
-          
-          const pending = pendingDecryptOpsRef.current.get(id);
-          if (pending) {
-            pendingDecryptOpsRef.current.delete(id);
-            if (type === 'ERROR') pending.reject(new Error(error));
-            else pending.resolve(new Uint8Array(data));
-          }
-        };
-     }
+       worker.onmessage = (e) => {
+         const { type, id, data, error } = e.data;
+         if (type === 'KEY_READY') {
+           decryptWorkerReadyRef.current = true;
+           addLog('🔐 Decryption Worker ready');
+           return;
+         }
+         const pending = pendingDecryptOpsRef.current.get(id);
+         if (pending) {
+           pendingDecryptOpsRef.current.delete(id);
+           if (type === 'ERROR') pending.reject(new Error(error));
+           else pending.resolve(new Uint8Array(data));
+         }
+       };
+       // Immediately try to send key if we already have it
+       if (sharedSecretRef.current) {
+         crypto.subtle.exportKey('raw', sharedSecretRef.current).then(raw => {
+           worker.postMessage({ type: 'INIT_KEY', keyData: raw });
+         }).catch(() => {});
+       }
+    }
 
     // Phase 2.2: Reconnect on visibility change
     const onVisibilityChange = () => {
@@ -393,18 +393,36 @@ export function useSecureRelayCall(
     }
 
     return new Promise((resolve, reject) => {
-      // Fallback to main thread if worker not ready or failed
-      if (!decryptWorkerRef.current || !sharedSecretRef.current || !decryptWorkerReadyRef.current) {
+      // 1. Check if worker is actually ready
+      if (!decryptWorkerRef.current || !decryptWorkerReadyRef.current) {
         if (sharedSecretRef.current) {
-          decryptData(sharedSecretRef.current, data).then(resolve).catch(reject);
-        } else {
-          reject(new Error('No shared secret or worker not ready'));
+          // Robust fallback: reconstruct [IV + Ciphertext] for decryptData
+          const combined = new Uint8Array(iv.length + data.length);
+          combined.set(iv, 0);
+          combined.set(data, iv.length);
+          decryptData(sharedSecretRef.current, combined).then(resolve).catch(reject);
+          return;
         }
+        reject(new Error('No decryption key'));
         return;
       }
       
+      // 2. Worker Timeout Fallback (500ms)
       const id = ++decryptOpIdRef.current;
-      pendingDecryptOpsRef.current.set(id, { resolve, reject });
+      const timeoutId = setTimeout(() => {
+        if (pendingDecryptOpsRef.current.has(id)) {
+          pendingDecryptOpsRef.current.delete(id);
+          const combined = new Uint8Array(iv.length + data.length);
+          combined.set(iv, 0);
+          combined.set(data, iv.length);
+          decryptData(sharedSecretRef.current!, combined).then(resolve).catch(reject);
+        }
+      }, 500);
+
+      pendingDecryptOpsRef.current.set(id, { 
+        resolve: (val: Uint8Array) => { clearTimeout(timeoutId); resolve(val); }, 
+        reject: (err: any) => { clearTimeout(timeoutId); reject(err); } 
+      });
       
       // === Phase 4 Fix: Clone buffers to avoid DataCloneError/Detached issues ===
       const payload = new Uint8Array(data).buffer;

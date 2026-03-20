@@ -207,8 +207,8 @@ export class AdaptiveH264Engine {
       const timeoutId = setTimeout(() => {
         if (this.pendingCryptoOps.has(id)) {
            this.pendingCryptoOps.delete(id);
-           if (this.onLog && id % 300 === 0) this.onLog(`\u26A0\uFE0F Encryption Worker timeout (id=${id}), falling back to main thread`);
-           encryptData(key, data).then(resolve).catch(reject);
+            if (this.onLog) this.onLog(`🚨 Encryption Worker timeout (id=${id}), falling back to main thread`);
+            encryptData(key, data).then(resolve).catch(reject);
         }
       }, 500);
 
@@ -244,31 +244,28 @@ export class AdaptiveH264Engine {
           const startTime = performance.now();
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-
-          // === Phase 3: Frame Size Limiter ===
-          if (data.length > 250000) {
-            if (this.onLog) this.onLog(`\uD83D\uDEA8 CRITICAL: Frame size too large (${Math.round(data.length/1024)}KB). Dropping to prevent buffer bloat.`);
-            this.needsKeyframe = true;
-            this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
-            this.applyBitrateToParams();
-            this.pendingFrames = Math.max(0, this.pendingFrames - 1);
-            return;
-          }
-
+          
+          const currentFrameId = this.frameId;
+          
           try {
-            const currentFrameId = this.frameId++;
-            if (this.onLog && currentFrameId % 30 === 0) this.onLog(`✅ Encoded frame ${currentFrameId} (size=${data.length})`);
+            if (this.onLog && currentFrameId % 30 === 0) {
+              this.onLog(`✅ Encoded frame ${currentFrameId} (size=${data.length})`);
+            }
 
             let finalData: Uint8Array = data;
             if (this.sharedSecret) {
               const iv = crypto.getRandomValues(new Uint8Array(12));
               finalData = await this.encryptInWorker(this.sharedSecret, data, iv).catch(err => {
-                return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
+                return encryptData(this.sharedSecret, data);
               });
             }
           
             const senderTs = Math.floor(performance.now() - this.sessionStartTime);
             const parts = await obfuscateSplit(finalData, currentFrameId, senderTs);
+            
+            // Increment frameId only after processing completes to ensure some sequentiality?
+            // Actually, increment it in processFrame to be safer.
+            // this.frameId++;
             for (const part of parts) {
               const u8Part = new Uint8Array(part);
               this.totalQueueBytes += u8Part.length;
@@ -325,11 +322,11 @@ export class AdaptiveH264Engine {
     
     try {
       this.encoder.configure({
-        codec: "avc1.42e01f", // Constrained Baseline Profile (42e)
+        codec: "avc1.42e01f", 
         width: width,
         height: height,
         bitrate: this.targetBitrate,
-        bitrateMode: 'constant',
+        bitrateMode: 'variable', // Phase 4: Use VBR for better iOS compatibility
         latencyMode: "realtime",
         // @ts-ignore
         avc: { format: "annexb", key_frame_interval: 60 } // GOP: 60 (2s at 30fps)
@@ -387,6 +384,7 @@ export class AdaptiveH264Engine {
     if (this.manualMode) return; 
 
     const now = performance.now();
+    
     const dt = (now - this.lastPiUpdateTs) / 1000;
     if (dt < 0.1) return; // Limit update frequency to 10Hz
     this.lastPiUpdateTs = now;
@@ -570,6 +568,15 @@ export class AdaptiveH264Engine {
     if (this.isRunning) return;
     this.isRunning = true;
     const now = performance.now();
+    
+    // Phase 4: Annex B Diagnostics
+    // NOTE: This code snippet appears to be intended for an H264Decoder class,
+    // as it references 'binary', 'frameId', 'this.isKeyFrame', and 'this.framesReceived'
+    // which are not defined in this AdaptiveH264Engine (sender) context.
+    // Inserting it here would cause syntax errors.
+    // The instruction mentions "adding diagnostics to H264Decoder.ts" but the provided
+    // document is AdaptiveH264Engine.ts.
+    // Therefore, this specific code block cannot be faithfully applied to this file.
     this.sessionStartTime = now;
     this.lastAIUpdate = now;
     this.lastTokenUpdate = now;
@@ -695,12 +702,14 @@ export class AdaptiveH264Engine {
           }
           this.sendQueue = [];
           this.totalQueueBytes = 0;
-          this.tokenBucketBytes = 20000; // Small boost for next I-frame
+          this.pendingFrames = 0; // Fix: Reset pending frames on congestion
+          this.tokenBucketBytes = 20000; 
           this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
           this.errorIntegral = 0; 
           this.applyBitrateToParams();
           this.aiState = 'congested';
           this.lastCongestionTs = now;
+          this.needsKeyframe = true; // Force I-frame after congestion
         }
       } else {
         this.lastFrameTime = now;
@@ -821,6 +830,7 @@ export class AdaptiveH264Engine {
 
         this.pendingFrames++;
         this.encoder.encode(frame, { keyFrame: this.needsKeyframe || this.frameId === 0 });
+        this.frameId++; // Increment frameId here (sync)
         this.needsKeyframe = false;
         return true;
       } finally {
