@@ -19,7 +19,7 @@ export function useSecureRelayCall(
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '', fps: 0, quality: 0, scale: 0, droppedFrames: 0, netState: 'Normal' });
-  const [metricHistory, setMetricHistory] = useState<{ts: number, rtt: number, fps: number, bitrate: number, state: string}[]>([]);
+  const [metricHistory, setMetricHistory] = useState<{ ts: number, rtt: number, fps: number, bitrate: number, state: string }[]>([]);
   const rttRef = useRef<number>(0);
   const [isFallbackMode, setIsFallbackMode] = useState<boolean>(false);
   const remoteCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,7 +35,7 @@ export function useSecureRelayCall(
   const mySupportsWebMRef = useRef<boolean>(false);
   const obfBufferRef = useRef<{ [frameId: number]: Uint8Array[] }>({});
   const sharedSecretRef = useRef<CryptoKey | null>(null);
-  
+
   // Fallback refs
   const fallbackVideoRef = useRef<HTMLVideoElement | null>(null);
   const adaptiveEngineRef = useRef<AdaptiveH264Engine | null>(null);
@@ -66,11 +66,11 @@ export function useSecureRelayCall(
       if (ws.readyState === WebSocket.OPEN) {
         pingCounter++;
         if (pingCounter >= 5) { // Every 500ms (5 * 100ms)
-           ws.send(JSON.stringify({ type: 'ping', ts: performance.now(), sid: mySidRef.current }));
-           pingCounter = 0;
+          ws.send(JSON.stringify({ type: 'ping', ts: performance.now(), sid: mySidRef.current }));
+          pingCounter = 0;
         }
       }
-      
+
       // Task 17 Refined: More permissive for high-bitrate video (256KB, 5s)
       if (buffered > 262144) {
         if (lastLargeBufferTimeRef.current === 0) lastLargeBufferTimeRef.current = Date.now();
@@ -81,7 +81,7 @@ export function useSecureRelayCall(
       } else {
         lastLargeBufferTimeRef.current = 0;
       }
-      
+
       const now = Date.now();
       const elapsed = Math.max(0.1, (now - lastBitrateCalcTimeRef.current) / 1000);
       const bitrate = Math.round((bytesReceivedRef.current * 8) / elapsed / 1024); // kbps
@@ -91,11 +91,11 @@ export function useSecureRelayCall(
 
       const engineStats = adaptiveEngineRef.current ? adaptiveEngineRef.current.getStats() : null;
       const newState = (engineStats as any)?.state || 'Normal';
-      
-      setStats(prev => ({ 
-        ...prev, 
-        fps: engineStats?.fps || 0, 
-        quality: engineStats?.quality || 0, 
+
+      setStats(prev => ({
+        ...prev,
+        fps: engineStats?.fps || 0,
+        quality: engineStats?.quality || 0,
         scale: engineStats?.scale || 0,
         droppedFrames: engineStats?.droppedFrames || 0,
         netState: newState,
@@ -161,7 +161,7 @@ export function useSecureRelayCall(
       wsRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try { mediaRecorderRef.current.stop(); } catch (e) {}
+      try { mediaRecorderRef.current.stop(); } catch (e) { }
     }
     if (adaptiveEngineRef.current) {
       adaptiveEngineRef.current.stop();
@@ -206,11 +206,11 @@ export function useSecureRelayCall(
     queueRef.current = [];
     obfBufferRef.current = {};
     currentRoomIdRef.current = null;
-    
+
     // 🔥 CRITICAL FIX: Explicitly drop the in-memory AES-GCM Key 
     // to preserve Perfect Forward Secrecy and prevent key material leaks
     sharedSecretRef.current = null;
-    
+
     // FIX: Reset RTT and other metrics for clean next call
     rttRef.current = 0;
     bytesReceivedRef.current = 0;
@@ -234,22 +234,22 @@ export function useSecureRelayCall(
   const addPadding = (originalBuffer: ArrayBuffer, type: number = 0, senderTs: number = 0) => {
     const originalView = new Uint8Array(originalBuffer);
     const originalSize = originalView.length;
-    
+
     // Audio (type 1/3): tiny padding
     const paddingSize = (type === 1 || type === 3)
-      ? Math.floor(Math.random() * 10) + 5   
+      ? Math.floor(Math.random() * 10) + 5
       : Math.floor(Math.random() * 400) + 100;
 
     const totalSize = 9 + originalSize + paddingSize; // Task 17: 9-byte header (1 + 4 + 4)
     const paddedBuffer = new ArrayBuffer(totalSize);
     const paddedView = new DataView(paddedBuffer);
     const paddedUint8 = new Uint8Array(paddedBuffer);
-    
+
     paddedUint8[0] = type;
     paddedView.setUint32(1, originalSize, true);
     paddedView.setUint32(5, senderTs, true); // Task 17: senderTs at pos 5
     paddedUint8.set(originalView, 9);
-    
+
     for (let i = 9 + originalSize; i < totalSize; i++) {
       paddedUint8[i] = Math.floor(Math.random() * 256);
     }
@@ -261,7 +261,7 @@ export function useSecureRelayCall(
     const type = new Uint8Array(paddedBuffer)[0];
     const originalSize = paddedView.getUint32(1, true);
     const senderTs = paddedView.getUint32(5, true); // Task 17
-    return { 
+    return {
       data: paddedBuffer.slice(9, 9 + originalSize),
       type,
       senderTs
@@ -270,7 +270,7 @@ export function useSecureRelayCall(
 
   const processQueue = () => {
     if (!sourceBufferRef.current || isAppendingRef.current || queueRef.current.length === 0) return;
-    
+
     if (queueRef.current.length > 30) {
       addLog(`⚠️ Queue getting large: ${queueRef.current.length} chunks`);
     }
@@ -291,7 +291,7 @@ export function useSecureRelayCall(
   // PCM Audio Receiver
   const receiverAudioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const SAMPLE_RATE = 8000; // Reduced from 16000 to save bandwidth (128kbps instead of 256kbps)
+  const SAMPLE_RATE = 16000; // Reduced from 16000 to save bandwidth (128kbps instead of 256kbps)
 
   const initAudioContexts = () => {
     if (isCleanedUpRef.current) return;
@@ -299,15 +299,15 @@ export function useSecureRelayCall(
 
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
       if (audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume().catch(() => {});
+        audioContextRef.current.resume().catch(() => { });
       }
     }
     if (!receiverAudioContextRef.current) {
       receiverAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
       if (receiverAudioContextRef.current.state === 'suspended') {
-        receiverAudioContextRef.current.resume().catch(() => {});
+        receiverAudioContextRef.current.resume().catch(() => { });
       }
-      
+
       // Create a silent oscillator to keep the audio context active and force Android to use media volume
       const osc = receiverAudioContextRef.current.createOscillator();
       const gain = receiverAudioContextRef.current.createGain();
@@ -331,7 +331,7 @@ export function useSecureRelayCall(
       (receiverAudioContextRef.current as any)._isLoopStarted = true;
       const playLoop = () => {
         if (isCleanedUpRef.current) return;
-        
+
         if (audioJitterBufferRef.current.length > 0 && h264DecoderRef.current) {
           const packet = audioJitterBufferRef.current[0];
           const stats = h264DecoderRef.current.getStats();
@@ -344,12 +344,12 @@ export function useSecureRelayCall(
               setTimeout(playLoop, 10);
               return;
             }
-            
+
             // Catch-up: if audio is too old (>500ms), drop it
             if (now - targetPlayTime > (h264DecoderRef.current?.getStats()?.dropThreshold || 500)) {
-               audioJitterBufferRef.current.shift();
-               setTimeout(playLoop, 5);
-               return;
+              audioJitterBufferRef.current.shift();
+              setTimeout(playLoop, 5);
+              return;
             }
           }
 
@@ -369,7 +369,7 @@ export function useSecureRelayCall(
           // We use the AudioContext's currentTime for precise scheduling if possible, 
           // but since we already waited for targetPlayTime in JS domain, playing immediately is fine.
           source.start(0);
-          
+
           audioJitterBufferRef.current.shift();
         }
         setTimeout(playLoop, 20);
@@ -390,19 +390,19 @@ export function useSecureRelayCall(
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    
+
     // Prevent multiple script processors
     if ((audioContextRef.current as any)._isSenderStarted) return;
     (audioContextRef.current as any)._isSenderStarted = true;
 
     const source = audioContextRef.current.createMediaStreamSource(stream);
-    
+
     // 8 kHz mono, буфер 256 сэмпла (~32 мс)
-    const scriptProcessor = audioContextRef.current.createScriptProcessor(256, 1, 1);
+    const scriptProcessor = audioContextRef.current.createScriptProcessor(1024, 1, 1);
 
     scriptProcessor.onaudioprocess = async (e) => {
       if (isAudioMuted) return; // Skip processing if mic is muted to prevent static
-      
+
       const inputData = e.inputBuffer.getChannelData(0);
       const outputData = e.outputBuffer.getChannelData(0);
       // Convert to 8-bit PCM to save 50% bandwidth vs 16-bit
@@ -417,7 +417,7 @@ export function useSecureRelayCall(
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         if (!sharedSecretRef.current) return;
-        
+
         let finalBuffer: ArrayBuffer;
         try {
           const encrypted = await encryptData(sharedSecretRef.current, pcm8);
@@ -425,18 +425,18 @@ export function useSecureRelayCall(
         } catch (err) {
           return;
         }
-        
+
         const senderTs = startTimeRef.current > 0 ? Math.floor(performance.now() - startTimeRef.current) : 0;
         const buffered = wsRef.current.bufferedAmount || 0;
         if (buffered < 256000) {
-          wsRef.current.send(addPadding(finalBuffer, 3, senderTs)); 
+          wsRef.current.send(addPadding(finalBuffer, 3, senderTs));
         }
       }
     };
 
     const gainNode = audioContextRef.current.createGain();
     gainNode.gain.value = 0; // Mute output
-    
+
     source.connect(scriptProcessor);
     scriptProcessor.connect(gainNode);
     gainNode.connect(audioContextRef.current.destination);
@@ -455,7 +455,7 @@ export function useSecureRelayCall(
     }
 
     addLog('🎥 Starting media recording (H.264 Priority)...');
-    
+
     // If engine is already running, just force an I-frame instead of destroying it
     // This prevents "frozen" frames during micro-reconnects
     if (adaptiveEngineRef.current && adaptiveEngineRef.current.isRunningNow()) {
@@ -465,7 +465,7 @@ export function useSecureRelayCall(
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try { mediaRecorderRef.current.stop(); } catch (e) {}
+      try { mediaRecorderRef.current.stop(); } catch (e) { }
     }
     if (adaptiveEngineRef.current) {
       adaptiveEngineRef.current.stop();
@@ -474,7 +474,7 @@ export function useSecureRelayCall(
 
     if (activeStreamRef.current) {
       startPCMAudioSender(activeStreamRef.current);
-      
+
       // In Secure Relay mode, we force our custom H.264 engine over standard WebM
       // because it provides much better latency control (catch-up logic) and 
       // is specifically tuned for 150-300kbps "survival" scenarios.
@@ -501,13 +501,13 @@ export function useSecureRelayCall(
       fallbackVideoRef.current.style.zIndex = '-1';
       document.body.appendChild(fallbackVideoRef.current);
     }
-    
+
     const video = fallbackVideoRef.current;
-    
+
     if (video.srcObject !== activeStreamRef.current) {
       video.srcObject = activeStreamRef.current;
     }
-    
+
     // Always try to play to ensure it's not paused
     video.play().catch(e => {
       console.error('Fallback video play error', e);
@@ -532,7 +532,7 @@ export function useSecureRelayCall(
         sharedSecretRef.current  // \u2190 Pass E2EE key so video frames are encrypted
       );
     }
-    
+
     // === FINAL iPhone + Android rotation fix ===
     let rotation = screen.orientation?.angle ?? 0;
     let mirror = false;
@@ -555,7 +555,7 @@ export function useSecureRelayCall(
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'rotation', value: rotation, mirror, sid: mySidRef.current }));
     }
-    
+
     adaptiveEngineRef.current.start();
     addLog('🚀 Adaptive H.264 Engine started');
   };
@@ -569,18 +569,18 @@ export function useSecureRelayCall(
 
   const generateEmojis = (seed: string) => {
     const emojiList = [
-      '🍎', '🦊', '🚀', '💎', '🌈', '🌙', '🍀', '🔥', 
+      '🍎', '🦊', '🚀', '💎', '🌈', '🌙', '🍀', '🔥',
       '🧊', '⚡', '🦄', '🎈', '🎨', '🎭', '🎸', '🏆',
       '🛸', '🪐', '🍄', '🌵', '🌸', '🐳', '🦜', '🦁'
     ];
-    
+
     // Simple hash function
     let hash = 0;
     for (let i = 0; i < seed.length; i++) {
       hash = ((hash << 5) - hash) + seed.charCodeAt(i);
       hash |= 0;
     }
-    
+
     const result = [];
     for (let i = 0; i < 4; i++) {
       const index = Math.abs((hash + i * 7) % emojiList.length);
@@ -601,7 +601,7 @@ export function useSecureRelayCall(
     addLog(`🔗 Connecting to Secure Relay room: ${roomId}`);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/secure-relay?room=${roomId}&token=${roomToken}`;
-    
+
     addLog(`📡 WebSocket URL: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -614,12 +614,12 @@ export function useSecureRelayCall(
       addLog('✅ WebSocket connected to Relay');
       setConnectionState('connected');
       setRemoteStream(new MediaStream()); // Trick Dashboard into thinking we have a stream
-      
+
       // Force a fresh I-frame on reconnect to prevent artifacts
       if (adaptiveEngineRef.current) {
         adaptiveEngineRef.current.forceKeyframe();
       }
-      
+
       // Send OS info to help receiver correct orientation (Android fix)
       const isAndroid = /Android/i.test(navigator.userAgent);
       if (isAndroid) {
@@ -628,7 +628,7 @@ export function useSecureRelayCall(
       }
 
       startTimeRef.current = performance.now();
-      
+
       // Task 17: Log shared secret hash for consistency check
       if (sharedSecretRef.current) {
         crypto.subtle.exportKey('raw', sharedSecretRef.current).then(raw => {
@@ -666,18 +666,18 @@ export function useSecureRelayCall(
     // Skip MediaSource entirely if we are using custom H.264/PCM mode
     const isMediaSourceSupported = !isFallbackMode && (typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined');
     let isMediaSourceFailed = isFallbackMode;
-    
+
     if (isFallbackMode) {
       addLog(`ℹ️ MediaSource skipped in Secure Relay (H.264/PCM) mode`);
     } else {
       addLog(`ℹ️ MediaSource support: ${isMediaSourceSupported ? (window.MediaSource ? 'Standard' : 'Managed') : 'None'}`);
     }
-    
+
     if (isMediaSourceSupported) {
       try {
         const MediaSourceClass = window.MediaSource || (window as any).ManagedMediaSource;
         const mediaSource = new MediaSourceClass();
-        
+
         mediaSource.addEventListener('sourceclose', () => addLog('ℹ️ MediaSource closed'));
         mediaSource.addEventListener('sourceended', () => addLog('ℹ️ MediaSource ended'));
 
@@ -702,7 +702,7 @@ export function useSecureRelayCall(
           try {
             const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
             let mimeType = 'video/webm; codecs="vp8, opus"';
-            
+
             if (isFallbackMode) {
               // If we are in fallback mode, we are likely receiving MP4 from iOS or to iOS
               // Check what the remote supports to guess what they are sending
@@ -726,7 +726,7 @@ export function useSecureRelayCall(
             const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
             sourceBufferRef.current = sourceBuffer;
             addLog(`✅ SourceBuffer created (${mimeType})`);
-            
+
             sourceBuffer.addEventListener('error', (e) => addLog(`❌ SourceBuffer error event: ${e}`));
             sourceBuffer.addEventListener('abort', () => addLog('⚠️ SourceBuffer abort event'));
 
@@ -735,7 +735,7 @@ export function useSecureRelayCall(
               processQueue(); // Task 10: Guaranteed reset and process next
             });
 
-            
+
             // Process any queued chunks that arrived before sourceopen
             processQueue();
           } catch (e) {
@@ -759,7 +759,7 @@ export function useSecureRelayCall(
           const trimmed = event.data.trim();
           if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return;
           const msg = JSON.parse(trimmed);
-          
+
           if (msg.type === 'ping') {
             if (msg.sid !== mySidRef.current) {
               ws.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
@@ -779,11 +779,11 @@ export function useSecureRelayCall(
             // Attempt 8: Ignore automatic rotation to prevent double-rotation
             return;
           }
-        } catch (e) {}
+        } catch (e) { }
       } else if (event.data instanceof ArrayBuffer) {
         bytesReceivedRef.current += event.data.byteLength;
         const part = new Uint8Array(event.data);
-        
+
         if (part[0] === 1 || part[0] === 3) {
           try {
             const paddingInfo = removePadding(event.data);
@@ -792,7 +792,7 @@ export function useSecureRelayCall(
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
             playAudioChunk(audioData, paddingInfo.senderTs);
-          } catch (e) {}
+          } catch (e) { }
           return;
         }
 
@@ -818,12 +818,12 @@ export function useSecureRelayCall(
                   clean = await decryptData(sharedSecretRef.current, clean);
                 } catch (e) { return; }
               }
-              
+
               if (!firstJpegReceivedRef.current) {
                 addLog(`🔐 First E2EE video frame decrypted successfully`);
                 firstJpegReceivedRef.current = true;
               }
-              
+
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
                 h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
               }
@@ -835,14 +835,14 @@ export function useSecureRelayCall(
 
               setIsFallbackMode(true);
 
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       } else if (event.data instanceof Blob) {
         const arrayBuffer = await (event.data as Blob).arrayBuffer();
         bytesReceivedRef.current += arrayBuffer.byteLength;
         const part = new Uint8Array(arrayBuffer);
-        
+
         if (part[0] === 1 || part[0] === 3) {
           try {
             const { data, senderTs } = removePadding(arrayBuffer);
@@ -851,10 +851,10 @@ export function useSecureRelayCall(
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
             playAudioChunk(audioData, senderTs);
-          } catch (e) {}
+          } catch (e) { }
           return;
         }
-        
+
         if (part[0] === 0xFF) {
           const frameId = part[1] | (part[2] << 8);
           const totalParts = part[9] | (part[10] << 8);
@@ -892,7 +892,7 @@ export function useSecureRelayCall(
 
               setIsFallbackMode(true);
 
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       }
@@ -900,7 +900,7 @@ export function useSecureRelayCall(
 
     ws.onclose = (e) => {
       addLog(`🔌 WebSocket closed: ${e.code} ${e.reason}`);
-      
+
       // Retry logic: only if we still have a roomId (not cleaned up) and not a clean close
       if (currentRoomIdRef.current && currentRoomTokenRef.current && retryCount < 3 && e.code !== 1000 && e.code !== 1005) {
         addLog(`🔄 Connection lost, retrying... (${retryCount + 1}/3)`);
@@ -985,7 +985,7 @@ export function useSecureRelayCall(
         addLog('🎙️ AudioContext resumed via manual action');
       }
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.play().catch(() => {});
+        remoteVideoRef.current.play().catch(() => { });
       }
     }
   };
