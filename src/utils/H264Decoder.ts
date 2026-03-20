@@ -27,9 +27,9 @@ export class H264Decoder {
   private lastRttSmoothed: number = 0;
 
   // Adaptive Jitter Buffer (Task 18 & Jitter Fix)
-  private readonly MAX_DELAY = 10000;
+  private readonly MAX_DELAY = 2000;
   private readonly MIN_DELAY = 100;
-  private readonly CATCH_UP_THRESHOLD = 2000;
+  private readonly CATCH_UP_THRESHOLD = 600;
 
   private firstSenderTs = -1;
   private firstPlayoutTime = -1;

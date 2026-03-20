@@ -117,7 +117,7 @@ export class AdaptiveH264Engine {
 
   private targetBitrate: number = 500_000;
   private lastConfiguredBitrate: number = 0;
-  private minBitrate: number = 100_000; // Attempt 1: Lowered to 100kbps
+  private minBitrate: number = 200_000; // Было 100_000
   private maxBitrate: number = 4_000_000;
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
@@ -161,7 +161,7 @@ export class AdaptiveH264Engine {
 
   // New GCC-inspired metrics
   private delayTrend: number = 0;
-  private readonly OVERUSE_THRESHOLD: number = 80;
+  private readonly OVERUSE_THRESHOLD: number = 10; // Было 80
   private readonly NORMAL_THRESHOLD: number = 25;
   private rttHistory: number[] = [];
   private lastSmoothedRtt: number = 0;
@@ -359,7 +359,7 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 100000;
-    const isOveruse = this.delayTrend > 10 || isBufferGrowing || queueDelay > 600; 
+    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || isBufferGrowing || queueDelay > 600; 
     
     if (isOveruse) {
       if (this.aiState !== 'congested') {
@@ -598,25 +598,22 @@ export class AdaptiveH264Engine {
         this.currentScale = 1.0;
       }
 
-      const possessesTokens = this.tokenBucketBytes >= 0; // Task 17: Credit-based (allow until 0)
-
-      if (bufferedAmount > 500000 || isInternalQueuePanic || !possessesTokens) {
+      const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
+      if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
         if (this.droppedFramesConsecutive >= 3) this.needsKeyframe = true;
         this.lastFrameTime = now;
 
-        // Attempt 9: Increased Buffer Thresholds
-        const panicThreshold = 512000; // 500KB
-        if ((isInternalQueuePanic || bufferedAmount > panicThreshold) && now - this.lastCongestionTs > this.congestionCooldown) {
+        if ((isInternalQueuePanic || bufferedAmount > maxWsBuffer * 1.5) && now - this.lastCongestionTs > this.congestionCooldown) {
           if (this.onLog) {
             this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, wsBuf=${Math.round(bufferedAmount / 1024)}KB, soft reset!`);
           }
           this.sendQueue = [];
 
           // Attempt 7: Softened Congestion Panic (20KB reserve)
-          this.tokenBucketBytes = 20480;
+          this.tokenBucketBytes = 20000;
 
           // Attempt 7: Panic Bitrate Cut
           this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
@@ -682,7 +679,7 @@ export class AdaptiveH264Engine {
       this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    if (this.pendingFrames > 6 || this.video.paused || this.video.ended || this.video.readyState < 2) {
+    if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3) {
       if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 6) {
         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
       }

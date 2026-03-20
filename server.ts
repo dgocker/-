@@ -63,18 +63,6 @@ async function startServer() {
   });
 
   wss.on('connection', (ws, request) => {
-    // Увеличиваем буферы отправки и получения для потокового видео (если поддерживается)
-    const socket = (ws as any)._socket;
-    if (socket) {
-      if (typeof socket.setSendBufferSize === 'function') {
-        socket.setSendBufferSize(2 * 1024 * 1024); 
-      }
-      if (typeof socket.setRecvBufferSize === 'function') {
-        socket.setRecvBufferSize(2 * 1024 * 1024);
-      }
-      console.log(`Socket buffers configuration attempted for ${request.socket.remoteAddress}`);
-    }
-
     const urlParams = new URLSearchParams(request.url?.split('?')[1] || '');
     const roomId = urlParams.get('room');
 
