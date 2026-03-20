@@ -130,6 +130,8 @@ export class H264Decoder {
 
     if (type === 'key' && this.onLog) {
       this.onLog(`🔑 Keyframe detected: frameId=${frameId}, size=${binary.length}`);
+    } else if (frameId % 60 === 0 && this.onLog) {
+      this.onLog(`📦 Delta frame: frameId=${frameId}, size=${binary.length}`);
     }
 
     // Adaptive Jitter Logic (Jitter = variance in arrival time)
@@ -250,7 +252,10 @@ export class H264Decoder {
         timestamp: videoTimeOffset * 1000,
         data: packet.raw
       });
-      this.decoder.decode(chunk);
+      if (this.onLog && Math.random() < 0.01) { // Log 1% of frames to avoid spam
+      this.onLog(`🎬 Playing frame ${packet.frameId}, gap=${Math.round(now - packet.receiveTime)}ms`);
+    }
+    this.decoder.decode(chunk);
     } catch (e: any) {
       if (this.onLog) this.onLog(`❌ Decode error: ${e.message}`);
       this.firstSenderTs = -1;

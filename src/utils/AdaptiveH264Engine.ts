@@ -438,10 +438,16 @@ export class AdaptiveH264Engine {
     if (this.rttHistory.length > 7) this.rttHistory.shift();
 
     const sorted = [...this.rttHistory].sort((a, b) => a - b);
-    const medianRtt = sorted[Math.floor(sorted.length / 2)];
+    let medianRtt = sorted[Math.floor(sorted.length / 2)];
+
+    // Protection against Zombie RTT (Audit 4)
+    if (medianRtt > 2000 && this.pendingFrames === 0) {
+      medianRtt = this.lastSmoothedRtt || 150;
+      this.rttHistory = [medianRtt];
+    }
 
     // Hard Cap for the median used in GCC calculations
-    const clampedRtt = Math.min(medianRtt, 5000);
+    const clampedRtt = Math.min(medianRtt, 3000);
 
     // Smoothed RTT (EMA with 0.7/0.3 weight to filter spikes)
     // Attempt 6: Asymmetric RTT Smoothing (EMA)
@@ -540,6 +546,14 @@ export class AdaptiveH264Engine {
     this.rafId = null;
     if (this.pacerInterval) clearInterval(this.pacerInterval);
     this.pacerInterval = null;
+
+    // Reset ABR and PI controller state
+    this.errorIntegral = 0;
+    this.rttHistory = [];
+    this.lastSmoothedRtt = 0;
+    this.lastRttSmoothed = 0;
+    this.delayTrend = 0;
+    this.tokenBucketBytes = (500_000 / 8) * 0.2;
 
     if (cryptoWorker) {
       cryptoWorker.postMessage({ type: 'CLEAR_KEY' });

@@ -28,7 +28,14 @@ export default function Dashboard() {
     // console.log(`[LOG] ${msg}`); // Avoid infinite loop if we intercept console.log
   }, []);
 
+  // Manual Video Controls (Attempt 8) - Moved up to avoid ReferenceError in useSecureRelayCall
+  const [remoteRotation, setRemoteRotation] = useState(0);
+  const [remoteMirror, setRemoteMirrorState] = useState(false);
+  const [remoteFlip, setRemoteFlipState] = useState(false);
+  const [localMirror, setLocalMirror] = useState(true);
+
   // Intercept global console.log to catch system and library logs
+  // Redundant with global clientLogger.ts but kept for local in-app log modal visibility
   useEffect(() => {
     const originalLog = console.log;
     const originalError = console.error;
@@ -215,13 +222,7 @@ export default function Dashboard() {
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   
-  // Manual Video Controls (Attempt 8)
-  const [remoteRotation, setRemoteRotation] = useState(0);
-  const [remoteMirror, setRemoteMirrorState] = useState(false);
-  const [remoteFlip, setRemoteFlipState] = useState(false);
-  const [localMirror, setLocalMirror] = useState(true);
-
-  // Auto-recovery for frozen video
+  // Recovery for frozen video
   useEffect(() => {
     if (connectionState === 'connected' && remoteVideoRef.current && remoteStream) {
       console.log('🔄 Connection restored/stable, ensuring remote video is playing');

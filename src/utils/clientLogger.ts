@@ -57,4 +57,14 @@ console.info = (...args: any[]) => {
   originalInfo.apply(console, args);
 };
 
+window.addEventListener('error', (event) => {
+  const message = `Global Error: ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`;
+  sendLogToServer('error', message, event.error?.stack);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const message = `Unhandled Rejection: ${event.reason}`;
+  sendLogToServer('error', message);
+});
+
 console.log('🚀 Client-to-Server log relay initialized.');

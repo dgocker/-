@@ -213,6 +213,7 @@ export function useSecureRelayCall(
     sharedSecretRef.current = null;
 
     // FIX: Reset RTT and other metrics for clean next call
+    mySidRef.current = Math.random().toString(36).substring(7);
     rttRef.current = 0;
     bytesReceivedRef.current = 0;
     lastBitrateCalcTimeRef.current = Date.now();
@@ -371,11 +372,11 @@ export function useSecureRelayCall(
 
           // Идеальное расписание из тестового приложения
           const currentTime = ctx.currentTime;
-          if (nextPlayTimeRef.current < currentTime) {
-            nextPlayTimeRef.current = currentTime + 0.04;
+          if (nextPlayTime < currentTime) {
+            nextPlayTime = currentTime + 0.04;
           }
-          source.start(nextPlayTimeRef.current);
-          nextPlayTimeRef.current += audioBuffer.duration;
+          source.start(nextPlayTime);
+          nextPlayTime += audioBuffer.duration;
 
           audioJitterBufferRef.current.shift();
 
@@ -579,7 +580,7 @@ export function useSecureRelayCall(
     setSecureEmojis(result);
   };
 
-  const connectToRelay = (roomId: string, roomToken: string, sharedSecret: CryptoKey | null, retryCount: number = 0) => {
+  const connectToRelay = (roomId: string, roomToken: string, sharedSecret: CryptoKey | null, loopback: boolean = false, retryCount: number = 0) => {
     isCleanedUpRef.current = false;
     currentRoomIdRef.current = roomId;
     currentRoomTokenRef.current = roomToken;
@@ -590,7 +591,8 @@ export function useSecureRelayCall(
     setConnectionState('checking');
     addLog(`🔗 Connecting to Secure Relay room: ${roomId}`);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/secure-relay?room=${roomId}&token=${roomToken}`;
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/secure-relay?room=${roomId}&token=${roomToken}${loopback ? '&loopback=true' : ''}`;
 
     addLog(`📡 WebSocket URL: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
@@ -604,6 +606,10 @@ export function useSecureRelayCall(
       addLog('✅ WebSocket connected to Relay');
       setConnectionState('connected');
       setRemoteStream(new MediaStream()); // Trick Dashboard into thinking we have a stream
+
+      // Send initial orientation (Confirmed by Audit 1, 3)
+      const initialRotation = window.orientation || (window.screen as any).orientation?.angle || 0;
+      ws.send(JSON.stringify({ type: 'rotation', rotation: initialRotation, sid: mySidRef.current }));
 
       // Force a fresh I-frame on reconnect to prevent artifacts
       if (adaptiveEngineRef.current) {
@@ -937,7 +943,7 @@ export function useSecureRelayCall(
         addLog(`🔄 Connection lost, retrying... (${retryCount + 1}/3)`);
         setTimeout(() => {
           if (currentRoomIdRef.current && currentRoomTokenRef.current) {
-            connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current, sharedSecretRef.current, retryCount + 1);
+            connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current, sharedSecretRef.current, loopback, retryCount + 1);
           }
         }, 2000);
       } else {
@@ -972,12 +978,24 @@ export function useSecureRelayCall(
   }, []);
 
 
-  const joinRoom = (roomId: string, roomToken: string, supportsWebM?: boolean, sharedSecret: CryptoKey | null = null) => {
+  const joinRoom = (roomId: string, roomToken: string, supportsWebM?: boolean, sharedSecret: CryptoKey | null = null, loopback: boolean = false) => {
     if (supportsWebM !== undefined) {
       mySupportsWebMRef.current = supportsWebM;
     }
-    connectToRelay(roomId, roomToken, sharedSecret);
+    connectToRelay(roomId, roomToken, sharedSecret, loopback);
   };
+  // Handle orientation change (Audit 5)
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      const angle = window.orientation || (window.screen as any).orientation?.angle || 0;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'rotation', rotation: angle, sid: mySidRef.current }));
+      }
+    };
+    window.addEventListener('orientationchange', handleOrientationChange);
+    return () => window.removeEventListener('orientationchange', handleOrientationChange);
+  }, []);
+
 
   return {
     initiateCall,

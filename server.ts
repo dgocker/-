@@ -82,6 +82,8 @@ async function startServer() {
     }
     rooms.get(roomId)!.add(ws);
 
+    const isLoopback = urlParams.get('loopback') === 'true';
+
     ws.on('message', (message, isBinary) => {
       const roomClients = rooms.get(roomId);
       if (roomClients) {
@@ -96,7 +98,7 @@ async function startServer() {
         }
 
         roomClients.forEach((client) => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
+          if ((client !== ws || isLoopback) && client.readyState === WebSocket.OPEN) {
             try {
               client.send(relayedMessage, { binary: isBinary });
             } catch (e) {

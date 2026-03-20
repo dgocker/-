@@ -4,7 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      // Early error logger to catch issues before the main bundle loads
+      window.onerror = function(msg, url, line, col, error) {
+        var message = "Global Error: " + msg + " at " + url + ":" + line + ":" + col;
+        if (error && error.stack) message += "\nStack: " + error.stack;
+        fetch('/api/logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level: 'error', message: message, timestamp: new Date().toISOString() })
+        }).catch(function(){});
+        return false;
+      };
+      window.onunhandledrejection = function(event) {
+        var message = "Unhandled Rejection: " + event.reason;
+        fetch('/api/logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level: 'error', message: message, timestamp: new Date().toISOString() })
+        }).catch(function(){});
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

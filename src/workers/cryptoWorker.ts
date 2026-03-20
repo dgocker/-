@@ -14,7 +14,7 @@ self.onmessage = async (event) => {
         keyData,
         { name: 'AES-GCM' },
         false,
-        ['encrypt']
+        ['encrypt', 'decrypt']
       );
       cryptoKey = keyMaterial;
       self.postMessage({ type: 'KEY_READY' });
