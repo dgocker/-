@@ -127,7 +127,9 @@ export async function initDb() {
     await pgDb.pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
-        telegram_id TEXT UNIQUE NOT NULL,
+        telegram_id TEXT UNIQUE,
+        login TEXT UNIQUE,
+        password_hash TEXT,
         first_name TEXT NOT NULL,
         last_name TEXT,
         username TEXT,
@@ -135,6 +137,14 @@ export async function initDb() {
         role TEXT DEFAULT 'user',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration for existing PG users table
+    try { await pgDb.pool.query(`ALTER TABLE users ALTER COLUMN telegram_id DROP NOT NULL;`); } catch(e) {}
+    try { await pgDb.pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login TEXT UNIQUE;`); } catch(e) {}
+    try { await pgDb.pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;`); } catch(e) {}
+
+    await pgDb.pool.query(`
 
       CREATE TABLE IF NOT EXISTS app_invites (
         id SERIAL PRIMARY KEY,
@@ -187,6 +197,7 @@ export async function initDb() {
     try { sqliteDb.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT;`); } catch(e) {}
     // SQLite doesn't support DROP NOT NULL easily, but it works if we just don't enforce it in new inserts.
 
+    sqliteDb.exec(`
       CREATE TABLE IF NOT EXISTS app_invites (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         code TEXT UNIQUE NOT NULL,

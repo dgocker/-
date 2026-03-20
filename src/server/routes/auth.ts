@@ -8,6 +8,27 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// Password hashing utility
+const hashPassword = async (password: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString('hex');
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      resolve(salt + ':' + derivedKey.toString('hex'));
+    });
+  });
+};
+
+const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
+  return new Promise((resolve, reject) => {
+    const [salt, key] = hash.split(':');
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) reject(err);
+      resolve(key === derivedKey.toString('hex'));
+    });
+  });
+};
+
 function verifyTelegramAuth(data: any, botToken: string) {
   const secret = crypto.createHash('sha256').update(botToken).digest();
   const checkString = Object.keys(data)
@@ -157,6 +178,79 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
   
   res.json({ token, user });
 }
+
+router.post('/login', async (req, res) => {
+  try {
+    const { login, password } = req.body;
+    if (!login || !password) {
+      return res.status(400).json({ error: 'Login and password are required' });
+    }
+
+    const user = await db.prepare('SELECT * FROM users WHERE login = ?').get(login) as any;
+    if (!user || !user.password_hash) {
+      return res.status(401).json({ error: 'Invalid login or password' });
+    }
+
+    const isValid = await verifyPassword(password, user.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid login or password' });
+    }
+
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user });
+  } catch (error) {
+    console.error('Error in /login:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/register', async (req, res) => {
+  try {
+    const { login, password, first_name, inviteCode } = req.body;
+    if (!login || !password || !first_name) {
+      return res.status(400).json({ error: 'Login, password, and first name are required' });
+    }
+
+    // Check if user exists
+    const existingUser = await db.prepare('SELECT * FROM users WHERE login = ?').get(login);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Login already taken' });
+    }
+
+    /* 
+    // Invites commented out as per user request
+    if (!inviteCode) {
+      return res.status(403).json({ error: 'Invite code required' });
+    }
+    const invite = await db.prepare('SELECT * FROM app_invites WHERE code = ? AND used_by IS NULL').get(inviteCode) as any;
+    if (!invite) {
+      return res.status(403).json({ error: 'Invalid or used invite code' });
+    }
+    */
+
+    const passwordHash = await hashPassword(password);
+    const stmt = db.prepare(`
+      INSERT INTO users (login, password_hash, first_name, role)
+      VALUES (?, ?, ?, 'user')
+    `);
+    const info = await stmt.run(login, passwordHash, first_name);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as any;
+
+    /*
+    // Mark invite as used
+    if (invite) {
+      await db.prepare('UPDATE app_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(user.id, invite.id);
+    }
+    */
+
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user });
+  } catch (error) {
+    console.error('Error in /register:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 router.post('/telegram', async (req, res) => {
   try {
