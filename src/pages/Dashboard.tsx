@@ -542,14 +542,6 @@ export default function Dashboard() {
         handleCallEnded();
         return;
       }
-      
-      // Add a small delay before initiating the call to ensure the other side is fully ready
-      // and to prevent race conditions with ICE candidates
-      setTimeout(() => {
-        console.log('Initiating call after delay...');
-        addLog('🚀 Initiating relay connection after delay...');
-        initiateCall(fromSocketId);
-      }, 1500);
     });
 
     newSocket.on('call_ended', (data) => {
