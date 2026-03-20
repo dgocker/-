@@ -48,7 +48,7 @@ export async function deobfuscateAssemble(chunks: Uint8Array[]): Promise<{ data:
 
     // Извлекаем senderTs из первого фрагмента
     const first = sorted[0];
-    const senderTs = first[3] | (first[4] << 8) | (first[5] << 16) | (first[6] << 24);
+    const senderTs = (first[3] | (first[4] << 8) | (first[5] << 16) | (first[6] << 24)) >>> 0;
 
     const seen = new Set<string>();
     const deduped = sorted.filter(c => {

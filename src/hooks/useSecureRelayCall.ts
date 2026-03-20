@@ -336,7 +336,7 @@ export function useSecureRelayCall(
     const originalSize = paddedView.getUint32(1, true);
     const senderTs = paddedView.getUint32(5, true); // Task 17
     return { 
-      data: new Uint8Array(paddedBuffer, 9, originalSize),
+      data: paddedBuffer.slice(9, 9 + originalSize),
       type,
       senderTs
     };
@@ -464,73 +464,65 @@ export function useSecureRelayCall(
         if (isCleanedUpRef.current) return;
         
         const ctx = receiverAudioContextRef.current!;
-        if (ctx.state === 'suspended') ctx.resume();
-
-        // Task 15: Adaptive Audio Drain
-        // Process multiple packets if they are already due, but cap at 5 to avoid blocking
-        let processedCount = 0;
-        while (audioJitterBufferRef.current.length > 0 && processedCount < 5) {
+        if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
-          const stats = h264DecoderRef.current?.getStats();
-          const now = performance.now();
-
+          const firstDecoder = h264DecoderRef.current;
+          const stats = firstDecoder?.getStats();
+          
+          // Sync logic: only if video is active and synced
           if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
             const targetPlayTime = stats.firstPlayoutTime + videoOffset + stats.targetDelay;
+            const now = performance.now();
 
-            if (now < targetPlayTime - 20) {
-              // Too early, wait
+            // If we are too early, wait a bit
+            if (now < targetPlayTime - 10) {
               setTimeout(playLoop, 10);
               return;
             }
             
-            if (now - targetPlayTime > 1000) {
-               // Too late, drop and continue immediately
+            // Catch-up: if audio is too old (>500ms), drop it
+            if (now - targetPlayTime > 500) {
                audioJitterBufferRef.current.shift();
-               continue;
+               setTimeout(playLoop, 5);
+               return;
             }
           }
+
+          if (ctx.state === 'suspended') ctx.resume();
+
+          const audioBuffer = ctx.createBuffer(1, packet.data.byteLength, SAMPLE_RATE);
+          const pcm8 = new Uint8Array(packet.data);
+          const f32 = new Float32Array(pcm8.length);
+          for (let i = 0; i < pcm8.length; i++) f32[i] = (pcm8[i] / 127.5) - 1.0;
+          audioBuffer.copyToChannel(f32, 0);
+
+          const source = ctx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(ctx.destination);
+
+          // Precise scheduling using AudioContext.currentTime
+          const currentTime = ctx.currentTime;
+          if (! (ctx as any)._nextPlayTime || (ctx as any)._nextPlayTime < currentTime) {
+            (ctx as any)._nextPlayTime = currentTime + 0.04; // Slightly larger buffer (40ms) for stability
+          }
           
-          // If we reach here, the packet is due!
-          playSingleAudioPacket(packet.data);
+          source.start((ctx as any)._nextPlayTime);
+          (ctx as any)._nextPlayTime += audioBuffer.duration;
+          
           audioJitterBufferRef.current.shift();
-          processedCount++;
+          
+          // If we have a large buffer, play next chunk sooner
+          const delay = audioJitterBufferRef.current.length > 10 ? 5 : 15;
+          setTimeout(playLoop, delay);
+          return;
         }
-        
-        setTimeout(playLoop, 5);
+        setTimeout(playLoop, 20);
       };
-      
       playLoop();
     }
   };
 
-  const playSingleAudioPacket = (data: ArrayBuffer | Uint8Array) => {
-    const ctx = receiverAudioContextRef.current!;
-    if (ctx.state === 'suspended') ctx.resume();
-    
-    const audioBuffer = ctx.createBuffer(1, data.byteLength, SAMPLE_RATE);
-    const pcm8 = new Uint8Array(data);
-    const f32 = new Float32Array(pcm8.length);
-    for (let i = 0; i < pcm8.length; i++) f32[i] = (pcm8[i] / 127.5) - 1.0;
-    audioBuffer.copyToChannel(f32, 0);
-
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-
-    // Precise scheduling using AudioContext.currentTime from a persistent ref
-    if (!(receiverAudioContextRef.current as any)._nextPlayTime) {
-      (receiverAudioContextRef.current as any)._nextPlayTime = ctx.currentTime + 0.05;
-    }
-    
-    let npt = (receiverAudioContextRef.current as any)._nextPlayTime;
-    if (npt < ctx.currentTime) {
-      npt = ctx.currentTime + 0.02; // 20ms safety if we slipped
-    }
-    
-    source.start(npt);
-    (receiverAudioContextRef.current as any)._nextPlayTime = npt + audioBuffer.duration;
-  };
 
   const cleanupPCMAudio = () => {
     if (receiverAudioContextRef.current) {
@@ -636,15 +628,10 @@ export function useSecureRelayCall(
             addLog('📤 Requested keyframe from remote');
           }
         };
-        h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
-          enableDynamicJitter: true
-        });
+        h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
         h264DecoderRef.current.setRotation(remoteRotation);
         h264DecoderRef.current.setMirror(remoteMirror);
         h264DecoderRef.current.setFlipV(remoteFlipV);
-        if (receiverAudioContextRef.current) {
-          h264DecoderRef.current.setAudioContext(receiverAudioContextRef.current);
-        }
       }
 
       addLog('🚀 Using H.264 + PCM Audio (Forced for all devices)');
@@ -687,25 +674,15 @@ export function useSecureRelayCall(
     if (!adaptiveEngineRef.current) {
       adaptiveEngineRef.current = new AdaptiveH264Engine(
         video,
-        (dataUrl) => {
-          // This callback is no longer used for sending frames directly, 
-          // as obfuscation is now handled inside AdaptiveH264Engine
-        },
-        () => {
-          return {
-            rtt: rttRef.current,
-            bufferedAmount: wsRef.current?.bufferedAmount || 0
-          };
-        },
+        (dataUrl) => {},
+        () => ({
+          rtt: rttRef.current,
+          bufferedAmount: wsRef.current?.bufferedAmount || 0
+        }),
         wsRef.current!,
         addLog,
-        sharedSecretRef.current,
-        {
-          enableSafeTailDrop: true,
-          enableScalablePacing: true
-        }
+        sharedSecretRef.current
       );
-      addLog('🛠️ Video Optimizations Enabled: Tail-Drop, Scalable Pacing, Dynamic Jitter (tanh)');
     }
     
     // === FINAL iPhone + Android rotation fix ===
@@ -1055,9 +1032,7 @@ export function useSecureRelayCall(
                     wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
                   }
                 };
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
-                  enableDynamicJitter: true
-                });
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
                 h264DecoderRef.current.setRotation(remoteRotation);
                 h264DecoderRef.current.setMirror(remoteMirror);
                 h264DecoderRef.current.setFlipV(remoteFlipV);
@@ -1131,9 +1106,7 @@ export function useSecureRelayCall(
                     wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
                   }
                 };
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
-                  enableDynamicJitter: true
-                });
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
                 h264DecoderRef.current.setRotation(remoteRotation);
                 h264DecoderRef.current.setMirror(remoteMirror);
                 h264DecoderRef.current.setFlipV(remoteFlipV);
@@ -1150,7 +1123,6 @@ export function useSecureRelayCall(
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
               }
 
-              setIsFallbackMode(true);
 
             } catch (e) {}
           }
