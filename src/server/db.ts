@@ -169,7 +169,9 @@ export async function initDb() {
     sqliteDb.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id TEXT UNIQUE NOT NULL,
+        telegram_id TEXT UNIQUE,
+        login TEXT UNIQUE,
+        password_hash TEXT,
         first_name TEXT NOT NULL,
         last_name TEXT,
         username TEXT,
@@ -177,6 +179,13 @@ export async function initDb() {
         role TEXT DEFAULT 'user',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration for SQLite users table
+    try { sqliteDb.exec(`ALTER TABLE users ADD COLUMN login TEXT;`); } catch(e) {}
+    try { sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login ON users(login);`); } catch(e) {}
+    try { sqliteDb.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT;`); } catch(e) {}
+    // SQLite doesn't support DROP NOT NULL easily, but it works if we just don't enforce it in new inserts.
 
       CREATE TABLE IF NOT EXISTS app_invites (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
