@@ -178,7 +178,7 @@ export class AdaptiveH264Engine {
             this.cryptoWorker?.postMessage({
               type: 'INIT_KEY',
               keyData: raw
-            }, [raw]);
+            });
           }).catch(err => reject(err));
         } else {
           resolve();
@@ -200,8 +200,9 @@ export class AdaptiveH264Engine {
       this.pendingCryptoOps.set(id, { resolve, reject, data, frameId: 0 });
       
       try {
-        const payload = data.buffer;
-        const ivBuffer = iv.buffer;
+        // Phase 4 Fix: Clone buffers to avoid DataCloneError/Detached issues
+        const payload = new Uint8Array(data).buffer;
+        const ivBuffer = new Uint8Array(iv).buffer;
         this.cryptoWorker!.postMessage({
           type: 'ENCRYPT_VIDEO',
           payload: payload,

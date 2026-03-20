@@ -47,7 +47,7 @@ export async function deriveAESKey(privateKey: CryptoKey, publicKey: CryptoKey):
     { name: 'ECDH', public: publicKey },
     privateKey,
     { name: 'AES-GCM', length: 256 },
-    false, // Shared AES key must remain locked in memory (non-extractable)
+    true, // Phase 4 Fix: Must be extractable to send to Worker
     ['encrypt', 'decrypt']
   );
 }
