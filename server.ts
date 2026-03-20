@@ -141,6 +141,22 @@ async function startServer() {
   app.use('/api/friends', friendRoutes);
   app.use('/api/support', supportRoutes);
 
+  // Client Log Receptor
+  app.post('/api/logs', (req, res) => {
+    const { level, message, timestamp } = req.body;
+    const prefix = `[CLIENT] [${timestamp || new Date().toISOString()}] [${(level || 'info').toUpperCase()}]`;
+    
+    if (level === 'error') {
+      console.error(`${prefix} ${message}`);
+    } else if (level === 'warn') {
+      console.warn(`${prefix} ${message}`);
+    } else {
+      console.log(`${prefix} ${message}`);
+    }
+    
+    res.sendStatus(200);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
