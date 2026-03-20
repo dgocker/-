@@ -23,7 +23,7 @@ const SECRET_TOKEN = process.env.RELAY_TOKEN || 'super-secret-anti-dpi-token-202
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-
+  
   // Initialize DB
   await initDb();
 
@@ -37,18 +37,18 @@ async function startServer() {
   setupSocket(io);
 
   // Setup Secure WebSocket Relay (Anti-DPI)
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   const rooms = new Map<string, Set<WebSocket>>();
 
   httpServer.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
-
+    
     if (url.pathname.startsWith('/secure-relay')) {
       const token = url.searchParams.get('token');
       const roomId = url.searchParams.get('room');
-
+      
       const roomConf = roomId ? activeCalls.get(roomId) : undefined;
-
+      
       if (roomConf && roomConf.token === token) {
         wss.handleUpgrade(request, socket, head, (ws) => {
           wss.emit('connection', ws, request);
@@ -62,6 +62,14 @@ async function startServer() {
   });
 
   wss.on('connection', (ws, request) => {
+    // Увеличиваем буферы отправки и получения для потокового видео
+    const socket = (ws as any)._socket;
+    if (socket) {
+      socket.setSendBufferSize(2 * 1024 * 1024); // 2 MB
+      socket.setRecvBufferSize(2 * 1024 * 1024); // 2 MB
+      console.log(`Socket buffers enlarged for ${request.socket.remoteAddress}`);
+    }
+
     const urlParams = new URLSearchParams(request.url?.split('?')[1] || '');
     const roomId = urlParams.get('room');
 
@@ -124,7 +132,7 @@ async function startServer() {
   });
 
   app.use(cors());
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json());
 
   // API Routes
   app.use('/api/auth', authRoutes);
@@ -149,23 +157,23 @@ async function startServer() {
   // Global Error Handler (must be last)
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('🔥 Server Error:', err);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    res.status(500).json({ 
+      error: 'Internal Server Error', 
+      message: process.env.NODE_ENV === 'development' ? err.message : undefined 
     });
   });
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
-
+    
     // Notify Admin via Telegram (standard for "bots" and free)
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.ADMIN_TELEGRAM_ID;
-
+    
     if (botToken && chatId) {
       const message = encodeURIComponent(`🚀 Secure Relay Server Started!\n📍 URL: ${process.env.APP_URL || 'Local'}\n⏰ Time: ${new Date().toLocaleString()}`);
       const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${message}`;
-
+      
       https.get(url, (res) => {
         if (res.statusCode === 200) {
           console.log('✅ Admin notified via Telegram');

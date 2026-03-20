@@ -47,7 +47,7 @@ export async function deriveAESKey(privateKey: CryptoKey, publicKey: CryptoKey):
     { name: 'ECDH', public: publicKey },
     privateKey,
     { name: 'AES-GCM', length: 256 },
-    true, // Phase 4 Fix: Must be extractable to send to Worker
+    false, // Shared AES key must remain locked in memory (non-extractable)
     ['encrypt', 'decrypt']
   );
 }
@@ -58,7 +58,7 @@ export async function encryptData(sharedKey: CryptoKey, data: Uint8Array): Promi
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: iv },
     sharedKey,
-    data as any // Cast to any for browser compatibility
+    data as Uint8Array // Type assertion to satisfy linter
   );
   
   // Pack as: [12 bytes IV] + [Ciphertext + AuthTag]
@@ -75,7 +75,7 @@ export async function decryptData(sharedKey: CryptoKey, data: Uint8Array): Promi
   const decrypted = await window.crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: iv },
     sharedKey,
-    ciphertext as any // Cast to any for browser compatibility
+    ciphertext as Uint8Array // Type assertion to satisfy linter
   );
   return new Uint8Array(decrypted);
 }

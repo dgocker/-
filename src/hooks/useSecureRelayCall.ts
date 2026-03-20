@@ -19,28 +19,9 @@ export function useSecureRelayCall(
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '', fps: 0, quality: 0, scale: 0, droppedFrames: 0, netState: 'Normal' });
-  const [remoteRotation, setRemoteRotation] = useState<number>(0);
-  const [remoteMirror, setRemoteMirror] = useState<boolean>(false);
-  const [remoteFlipV, setRemoteFlipV] = useState<boolean>(false);
   const [metricHistory, setMetricHistory] = useState<{ts: number, rtt: number, fps: number, bitrate: number, state: string}[]>([]);
-  
-  // Phase 3.2: Decryption Worker
-  const decryptWorkerRef = useRef<Worker | null>(null);
-  const pendingDecryptOpsRef = useRef(new Map<number, { resolve: (data: Uint8Array) => void; reject: (err: Error) => void }>());
-  const decryptOpIdRef = useRef(0);
-  const decryptWorkerReadyRef = useRef<boolean>(false);
   const rttRef = useRef<number>(0);
-  const canRecordWebM = typeof MediaRecorder !== 'undefined' && 
-    (MediaRecorder.isTypeSupported('video/webm; codecs="vp8, opus"') || 
-     MediaRecorder.isTypeSupported('video/webm; codecs=vp8') || 
-     MediaRecorder.isTypeSupported('video/webm'));
-  const canPlayWebM = typeof window.MediaSource !== 'undefined' && 
-    (MediaSource.isTypeSupported('video/webm; codecs="vp8, opus"') || 
-     MediaSource.isTypeSupported('video/webm; codecs=vp8') || 
-     MediaSource.isTypeSupported('video/webm'));
-  const mySupportsWebM = canRecordWebM && canPlayWebM;
-
-  const [isFallbackMode, setIsFallbackMode] = useState<boolean>(!mySupportsWebM);
+  const [isFallbackMode, setIsFallbackMode] = useState<boolean>(false);
   const remoteCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const h264DecoderRef = useRef<H264Decoder | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -51,7 +32,7 @@ export function useSecureRelayCall(
   const currentRoomIdRef = useRef<string | null>(null);
   const currentRoomTokenRef = useRef<string | null>(null);
   const remoteSupportsWebMRef = useRef<boolean>(false); // Task 14: Safe default
-  const mySupportsWebMRef = useRef<boolean>(mySupportsWebM);
+  const mySupportsWebMRef = useRef<boolean>(false);
   const obfBufferRef = useRef<{ [frameId: number]: Uint8Array[] }>({});
   const sharedSecretRef = useRef<CryptoKey | null>(null);
   
@@ -75,7 +56,6 @@ export function useSecureRelayCall(
   const mySidRef = useRef<string>(Math.random().toString(36).substring(7));
   const isCleanedUpRef = useRef(false);
   const orientationListenerRef = useRef<(() => void) | null>(null);
-  const loopbackStreamRef = useRef<MediaStream | null>(null);
 
 
   const startPing = (ws: WebSocket) => {
@@ -159,47 +139,16 @@ export function useSecureRelayCall(
       }
     };
 
-    if (connectionState === 'connected') handler();
-
-    if (!decryptWorkerRef.current && typeof Worker !== 'undefined') {
-       const worker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
-       decryptWorkerRef.current = worker;
-       worker.onmessage = (e) => {
-         const { type, id, data, error } = e.data;
-         if (type === 'KEY_READY') {
-           decryptWorkerReadyRef.current = true;
-           addLog('🔐 Decryption Worker ready');
-           return;
-         }
-         const pending = pendingDecryptOpsRef.current.get(id);
-         if (pending) {
-           pendingDecryptOpsRef.current.delete(id);
-           if (type === 'ERROR') pending.reject(new Error(error));
-           else pending.resolve(new Uint8Array(data));
-         }
-       };
-       // Immediately try to send key if we already have it
-       if (sharedSecretRef.current) {
-         crypto.subtle.exportKey('raw', sharedSecretRef.current).then(raw => {
-           worker.postMessage({ type: 'INIT_KEY', keyData: raw });
-         }).catch(() => {});
-       }
+    window.addEventListener('orientationchange', handler);
+    // Also listen to screen orientation change for modern browsers (Android)
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', handler);
     }
-
-    // Phase 2.2: Reconnect on visibility change
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !isCleanedUpRef.current && currentRoomIdRef.current) {
-        if (wsRef.current?.readyState === WebSocket.CLOSED || wsRef.current?.readyState === WebSocket.CLOSING) {
-          addLog('☀️ Visibility restored: Forcing relay reconnection');
-          connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current!, sharedSecretRef.current);
-        }
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    
+    if (connectionState === 'connected') handler();
 
     return () => {
       window.removeEventListener('orientationchange', handler);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (screen.orientation) {
         screen.orientation.removeEventListener('change', handler);
       }
@@ -216,8 +165,6 @@ export function useSecureRelayCall(
     }
 
     // Task 329: Stop engine and clear crypto key
-    rttRef.current = 0;
-    // mySidRef.current = 0; // This line was causing a type error, mySidRef is string
     if (adaptiveEngineRef.current) {
       adaptiveEngineRef.current.stop();
     }
@@ -294,14 +241,6 @@ export function useSecureRelayCall(
       }
       remoteVideoRef.current.src = '';
     }
-    
-    // 🔥 Fix: Terminate worker to prevent multi-call state leakage
-    if (decryptWorkerRef.current) {
-      decryptWorkerRef.current.postMessage({ type: 'CLEAR_KEY' });
-      decryptWorkerRef.current.terminate();
-      decryptWorkerRef.current = null;
-      decryptWorkerReadyRef.current = false;
-    }
   }, [remoteVideoRef, addLog]);
 
 
@@ -365,7 +304,7 @@ export function useSecureRelayCall(
   // PCM Audio Receiver
   const receiverAudioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const SAMPLE_RATE = 16000; // Phase 4: Increased from 8000 for better quality
+  const SAMPLE_RATE = 8000; // Reduced from 16000 to save bandwidth (128kbps instead of 256kbps)
 
   const initAudioContexts = () => {
     if (isCleanedUpRef.current) return;
@@ -392,103 +331,42 @@ export function useSecureRelayCall(
     }
   };
 
-  const decryptInWorker = async (data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> => {
-    // FIX BUG: Wait for initialization if it's pending
-    if (decryptWorkerRef.current && !decryptWorkerReadyRef.current) {
-        // Poll briefly: usually KEY_READY happens in <10ms
-        let waitCount = 0;
-        while (!decryptWorkerReadyRef.current && waitCount < 50) {
-            await new Promise(r => setTimeout(r, 10));
-            waitCount++;
-        }
-    }
-
-    return new Promise((resolve, reject) => {
-      // 1. Check if worker is actually ready
-      if (!decryptWorkerRef.current || !decryptWorkerReadyRef.current) {
-        if (sharedSecretRef.current) {
-          // Robust fallback: reconstruct [IV + Ciphertext] for decryptData
-          const combined = new Uint8Array(iv.length + data.length);
-          combined.set(iv, 0);
-          combined.set(data, iv.length);
-          decryptData(sharedSecretRef.current, combined).then(resolve).catch(reject);
-          return;
-        }
-        reject(new Error('No decryption key'));
-        return;
-      }
-      
-      // 2. Worker Timeout Fallback (500ms)
-      const id = ++decryptOpIdRef.current;
-      const timeoutId = setTimeout(() => {
-        if (pendingDecryptOpsRef.current.has(id)) {
-          pendingDecryptOpsRef.current.delete(id);
-          const combined = new Uint8Array(iv.length + data.length);
-          combined.set(iv, 0);
-          combined.set(data, iv.length);
-          decryptData(sharedSecretRef.current!, combined).then(resolve).catch(reject);
-        }
-      }, 500);
-
-      pendingDecryptOpsRef.current.set(id, { 
-        resolve: (val: Uint8Array) => { clearTimeout(timeoutId); resolve(val); }, 
-        reject: (err: any) => { clearTimeout(timeoutId); reject(err); } 
-      });
-      
-      // === Phase 4 Fix: Clone buffers to avoid DataCloneError/Detached issues ===
-      const payload = new Uint8Array(data).buffer;
-      const ivBuffer = new Uint8Array(iv).buffer;
-      
-      decryptWorkerRef.current.postMessage({
-        type: 'DECRYPT_VIDEO',
-        payload: payload,
-        iv: ivBuffer,
-        id
-      }, [payload, ivBuffer]);
-    });
-  };
-
   const playAudioChunk = (chunk: ArrayBuffer | Uint8Array, senderTs: number = 0) => {
     if (!receiverAudioContextRef.current) {
-      initAudioContexts();
+      receiverAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    
-    // === Phase 4: A/V Sync Jitter Buffer ===
+
+    // Task 17: Use Jitter Buffer for A/V Sync
     audioJitterBufferRef.current.push({ data: chunk, senderTs });
-    if (audioJitterBufferRef.current.length > 150) audioJitterBufferRef.current.shift();
+    if (audioJitterBufferRef.current.length > 150) audioJitterBufferRef.current.shift(); // Relaxed safety cap
 
     if (!(receiverAudioContextRef.current as any)._isLoopStarted) {
       (receiverAudioContextRef.current as any)._isLoopStarted = true;
-      
       const playLoop = () => {
         if (isCleanedUpRef.current) return;
         
-        const ctx = receiverAudioContextRef.current!;
-        if (audioJitterBufferRef.current.length > 0) {
+        if (audioJitterBufferRef.current.length > 0 && h264DecoderRef.current) {
           const packet = audioJitterBufferRef.current[0];
-          const firstDecoder = h264DecoderRef.current;
-          const stats = firstDecoder?.getStats();
-          
-          // Sync logic: only if video is active and synced
-          if (stats && stats.firstPlayoutTime > 0) {
+          const stats = h264DecoderRef.current.getStats();
+          if (stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
             const targetPlayTime = stats.firstPlayoutTime + videoOffset + stats.targetDelay;
             const now = performance.now();
 
-            // If we are too early, wait a bit
-            if (now < targetPlayTime - 10) {
+            if (now < targetPlayTime) {
               setTimeout(playLoop, 10);
               return;
             }
             
             // Catch-up: if audio is too old (>500ms), drop it
-            if (now - targetPlayTime > 500) {
+            if (now - targetPlayTime > (h264DecoderRef.current?.getStats()?.dropThreshold || 500)) {
                audioJitterBufferRef.current.shift();
                setTimeout(playLoop, 5);
                return;
             }
           }
 
+          const ctx = receiverAudioContextRef.current!;
           if (ctx.state === 'suspended') ctx.resume();
 
           const audioBuffer = ctx.createBuffer(1, packet.data.byteLength, SAMPLE_RATE);
@@ -501,28 +379,17 @@ export function useSecureRelayCall(
           source.buffer = audioBuffer;
           source.connect(ctx.destination);
 
-          // Precise scheduling using AudioContext.currentTime
-          const currentTime = ctx.currentTime;
-          if (! (ctx as any)._nextPlayTime || (ctx as any)._nextPlayTime < currentTime) {
-            (ctx as any)._nextPlayTime = currentTime + 0.04; // Slightly larger buffer (40ms) for stability
-          }
-          
-          source.start((ctx as any)._nextPlayTime);
-          (ctx as any)._nextPlayTime += audioBuffer.duration;
+          // We use the AudioContext's currentTime for precise scheduling if possible, 
+          // but since we already waited for targetPlayTime in JS domain, playing immediately is fine.
+          source.start(0);
           
           audioJitterBufferRef.current.shift();
-          
-          // If we have a large buffer, play next chunk sooner
-          const delay = audioJitterBufferRef.current.length > 10 ? 5 : 15;
-          setTimeout(playLoop, delay);
-          return;
         }
         setTimeout(playLoop, 20);
       };
       playLoop();
     }
   };
-
 
   const cleanupPCMAudio = () => {
     if (receiverAudioContextRef.current) {
@@ -621,19 +488,9 @@ export function useSecureRelayCall(
     if (activeStreamRef.current) {
       startPCMAudioSender(activeStreamRef.current);
       
-      if (!h264DecoderRef.current && remoteCanvasRef.current) {
-        const requestKeyframe = () => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
-            addLog('📤 Requested keyframe from remote');
-          }
-        };
-        h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
-        h264DecoderRef.current.setRotation(remoteRotation);
-        h264DecoderRef.current.setMirror(remoteMirror);
-        h264DecoderRef.current.setFlipV(remoteFlipV);
-      }
-
+      // In Secure Relay mode, we force our custom H.264 engine over standard WebM
+      // because it provides much better latency control (catch-up logic) and 
+      // is specifically tuned for 150-300kbps "survival" scenarios.
       addLog('🚀 Using H.264 + PCM Audio (Forced for all devices)');
       startFallbackRecording();
     } else {
@@ -650,10 +507,9 @@ export function useSecureRelayCall(
       fallbackVideoRef.current.playsInline = true;
       // Use absolute positioning instead of display: none to prevent browsers (like iOS Safari) from pausing the video
       fallbackVideoRef.current.style.position = 'absolute';
-      // Increased visibility to avoid browser throttling
-      fallbackVideoRef.current.style.width = '160px';
-      fallbackVideoRef.current.style.height = '90px';
-      fallbackVideoRef.current.style.opacity = '0.05';
+      fallbackVideoRef.current.style.width = '1px';
+      fallbackVideoRef.current.style.height = '1px';
+      fallbackVideoRef.current.style.opacity = '0.01';
       fallbackVideoRef.current.style.pointerEvents = 'none';
       fallbackVideoRef.current.style.zIndex = '-1';
       document.body.appendChild(fallbackVideoRef.current);
@@ -674,14 +530,19 @@ export function useSecureRelayCall(
     if (!adaptiveEngineRef.current) {
       adaptiveEngineRef.current = new AdaptiveH264Engine(
         video,
-        (dataUrl) => {},
-        () => ({
-          rtt: rttRef.current,
-          bufferedAmount: wsRef.current?.bufferedAmount || 0
-        }),
+        (dataUrl) => {
+          // This callback is no longer used for sending frames directly, 
+          // as obfuscation is now handled inside AdaptiveH264Engine
+        },
+        () => {
+          return {
+            rtt: rttRef.current,
+            bufferedAmount: wsRef.current?.bufferedAmount || 0
+          };
+        },
         wsRef.current!,
         addLog,
-        sharedSecretRef.current
+        sharedSecretRef.current  // \u2190 Pass E2EE key so video frames are encrypted
       );
     }
     
@@ -718,9 +579,6 @@ export function useSecureRelayCall(
     console.log('Remote supports WebM:', supports);
     addLog(`ℹ️ Remote supports WebM: ${supports}`);
     
-    // Update fallback mode state immediately
-    setIsFallbackMode(!supports || !mySupportsWebMRef.current);
-    
     if (changed && connectionState === 'connected') {
       addLog('🚀 Remote WebM support changed, restarting recording...');
       startRecording();
@@ -742,6 +600,7 @@ export function useSecureRelayCall(
       hash = ((hash << 5) - hash) + seed.charCodeAt(i);
       hash |= 0;
     }
+    
     const result = [];
     for (let i = 0; i < 4; i++) {
       const index = Math.abs((hash + i * 7) % emojiList.length);
@@ -751,15 +610,10 @@ export function useSecureRelayCall(
   };
 
   const connectToRelay = (roomId: string, roomToken: string, sharedSecret: CryptoKey | null, retryCount: number = 0) => {
-    if (sharedSecret && decryptWorkerRef.current) {
-        crypto.subtle.exportKey('raw', sharedSecret).then(raw => {
-          // --- Phase 4 Fix: Don't transfer keyData (copy for reliability) ---
-          decryptWorkerRef.current?.postMessage({ type: 'INIT_KEY', keyData: raw });
-        }).catch(err => addLog(`❌ Failed to export secret for worker: ${err}`));
-    }
     isCleanedUpRef.current = false;
     currentRoomIdRef.current = roomId;
     currentRoomTokenRef.current = roomToken;
+    sharedSecretRef.current = null; // Task 15: Reset before setting new one
     sharedSecretRef.current = sharedSecret;
 
     generateEmojis(roomId);
@@ -824,36 +678,16 @@ export function useSecureRelayCall(
     ws.onerror = (e) => {
       console.error('WebSocket error:', e);
       addLog(`❌ WebSocket error (State: ${ws.readyState}, Buffered: ${ws.bufferedAmount})`);
+      // Fallback: if we are stuck in 'checking', set to 'disconnected' to allow manual retry or auto-retry in onclose
       if (connectionState === 'checking') setConnectionState('disconnected');
     };
 
-    ws.onclose = (event) => {
-      if (wsRef.current === ws) wsRef.current = null;
-      setConnectionState('disconnected');
-      
-      const isAbnormal = event.code === 1006 || event.code === 1001;
-      addLog(`🔌 WebSocket closed: ${event.code} (Abnormal=${isAbnormal})`);
-
-      if (!isCleanedUpRef.current && isAbnormal && retryCount < 10) {
-        const delay = Math.min(30000, Math.pow(2, retryCount) * 1000 + (Math.random() * 1000));
-        addLog(`🔄 Reconnecting in ${Math.round(delay)}ms (attempt ${retryCount + 1})...`);
-        setTimeout(() => {
-          if (!isCleanedUpRef.current && currentRoomIdRef.current) {
-            connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current!, sharedSecretRef.current, retryCount + 1);
-          }
-        }, delay);
-      }
-    };
-
-    const isFallbackModeLocal = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
-    // Sync state variable for UI
-    setIsFallbackMode(isFallbackModeLocal);
-    
+    const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
     // Skip MediaSource entirely if we are using custom H.264/PCM mode
-    const isMediaSourceSupported = !isFallbackModeLocal && (typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined');
-    let isMediaSourceFailed = isFallbackModeLocal;
+    const isMediaSourceSupported = !isFallbackMode && (typeof window.MediaSource !== 'undefined' || typeof (window as any).ManagedMediaSource !== 'undefined');
+    let isMediaSourceFailed = isFallbackMode;
     
-    if (isFallbackModeLocal) {
+    if (isFallbackMode) {
       addLog(`ℹ️ MediaSource skipped in Secure Relay (H.264/PCM) mode`);
     } else {
       addLog(`ℹ️ MediaSource support: ${isMediaSourceSupported ? (window.MediaSource ? 'Standard' : 'Managed') : 'None'}`);
@@ -962,19 +796,12 @@ export function useSecureRelayCall(
             return;
           }
           if (msg.type === 'rotation') {
-            setRemoteRotation(msg.value || 0);
-            setRemoteMirror(!!msg.mirror);
             if (h264DecoderRef.current) {
               h264DecoderRef.current.setRotation(msg.value);
             }
             if (remoteVideoRef.current) {
               remoteVideoRef.current.style.transform = `rotate(${msg.value}deg)`;
             }
-            return;
-          }
-          if (msg.type === 'request_keyframe') {
-            addLog('📥 Remote requested keyframe');
-            adaptiveEngineRef.current?.forceKeyframe();
             return;
           }
         } catch (e) {}
@@ -987,9 +814,7 @@ export function useSecureRelayCall(
             const paddingInfo = removePadding(event.data);
             let audioData: ArrayBuffer | Uint8Array = paddingInfo.data;
             if (part[0] === 3 && sharedSecretRef.current) {
-              const iv = new Uint8Array(audioData.slice(0, 12));
-              const ciphertext = new Uint8Array(audioData.slice(12));
-              audioData = await decryptInWorker(ciphertext, iv);
+              audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
             playAudioChunk(audioData, paddingInfo.senderTs);
           } catch (e) {}
@@ -1015,9 +840,7 @@ export function useSecureRelayCall(
               let { data: clean, senderTs } = await deobfuscateAssemble(chunksToProcess);
               if (sharedSecretRef.current) {
                 try {
-                  const iv = clean.subarray(0, 12);
-                  const ciphertext = clean.subarray(12);
-                  clean = await decryptInWorker(ciphertext, iv);
+                  clean = await decryptData(sharedSecretRef.current, clean);
                 } catch (e) { return; }
               }
               
@@ -1027,28 +850,15 @@ export function useSecureRelayCall(
               }
               
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                const requestKeyframe = () => {
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
-                  }
-                };
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
-                h264DecoderRef.current.setRotation(remoteRotation);
-                h264DecoderRef.current.setMirror(remoteMirror);
-                h264DecoderRef.current.setFlipV(remoteFlipV);
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
               }
               if (h264DecoderRef.current) {
-                // Task 18: Canvas Loopback for UI
-                if (remoteCanvasRef.current && (remoteCanvasRef.current as any).captureStream && !loopbackStreamRef.current) {
-                  const loopback = (remoteCanvasRef.current as any).captureStream(24);
-                  loopbackStreamRef.current = loopback;
-                  setRemoteStream(loopback);
-                }
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
                 // @ts-ignore
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
               }
 
+              setIsFallbackMode(true);
 
             } catch (e) {}
           }
@@ -1063,9 +873,7 @@ export function useSecureRelayCall(
             const { data, senderTs } = removePadding(arrayBuffer);
             let audioData: ArrayBuffer | Uint8Array = data;
             if (part[0] === 3 && sharedSecretRef.current) {
-              const iv = new Uint8Array(audioData.slice(0, 12));
-              const ciphertext = new Uint8Array(audioData.slice(12));
-              audioData = await decryptInWorker(ciphertext, iv);
+              audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
             playAudioChunk(audioData, senderTs);
           } catch (e) {}
@@ -1091,9 +899,7 @@ export function useSecureRelayCall(
               let { data: clean, senderTs } = await deobfuscateAssemble(chunksToProcess);
               if (sharedSecretRef.current) {
                 try {
-                  const iv = clean.subarray(0, 12);
-                  const ciphertext = clean.subarray(12);
-                  clean = await decryptInWorker(ciphertext, iv);
+                  clean = await decryptData(sharedSecretRef.current, clean);
                 } catch (e) { return; }
               }
               if (!firstJpegReceivedRef.current) {
@@ -1101,28 +907,15 @@ export function useSecureRelayCall(
                 firstJpegReceivedRef.current = true;
               }
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                const requestKeyframe = () => {
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
-                  }
-                };
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe);
-                h264DecoderRef.current.setRotation(remoteRotation);
-                h264DecoderRef.current.setMirror(remoteMirror);
-                h264DecoderRef.current.setFlipV(remoteFlipV);
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
               }
               if (h264DecoderRef.current) {
-                // Task 18: Canvas Loopback for UI
-                if (remoteCanvasRef.current && (remoteCanvasRef.current as any).captureStream && !loopbackStreamRef.current) {
-                  const loopback = (remoteCanvasRef.current as any).captureStream(24);
-                  loopbackStreamRef.current = loopback;
-                  setRemoteStream(loopback);
-                }
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
                 // @ts-ignore
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
               }
 
+              setIsFallbackMode(true);
 
             } catch (e) {}
           }
@@ -1176,7 +969,10 @@ export function useSecureRelayCall(
     if (h264DecoderRef.current) {
       h264DecoderRef.current.setRotation(angle);
     }
-  }, []);
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.style.transform = `rotate(${angle}deg)`;
+    }
+  }, [remoteVideoRef]);
 
   const joinRoom = (roomId: string, roomToken: string, supportsWebM?: boolean, sharedSecret: CryptoKey | null = null) => {
     if (supportsWebM !== undefined) {
@@ -1201,8 +997,6 @@ export function useSecureRelayCall(
     isFallbackMode,
     remoteCanvasRef,
     metricHistory,
-    remoteRotation,
-    remoteMirror,
     resumeAudio: async () => {
       addLog('🎙️ resumeAudio called');
       if (isCleanedUpRef.current) {

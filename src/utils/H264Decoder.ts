@@ -11,15 +11,13 @@ export class H264Decoder {
   private ctx: CanvasRenderingContext2D;
   private decoder: VideoDecoder | null = null;
   private jitterBuffer: VideoPacket[] = [];
-  private targetDelay = 500; // Reduced from 2000ms to 500ms
+  private targetDelay = 2000; // Fixed large value to handle RTT spikes
 
   private isPlaying = false;
   private onLog?: (msg: string) => void;
-  private onRequestKeyframe?: (isPanic: boolean) => void;
   private isConfigured = false;
   private rotation: number = 0; 
   private mirror: boolean = false;
-  private flipV: boolean = false;
   
   private currentRtt: number = 0;
   private estimatedOneWay: number = 0;
@@ -27,9 +25,9 @@ export class H264Decoder {
   private lastRttSmoothed: number = 0;
   
   // Adaptive Jitter Buffer (Task 18 & Jitter Fix)
-  private readonly MAX_DELAY = 2000; 
-  private readonly MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 80; // Increased min delay for Android
-  private readonly CATCH_UP_THRESHOLD = 600; 
+  private readonly MAX_DELAY = 10000; 
+  private readonly MIN_DELAY = 100;
+  private readonly CATCH_UP_THRESHOLD = 2000;
 
   private firstSenderTs = -1;
   private firstPlayoutTime = -1;
@@ -40,11 +38,10 @@ export class H264Decoder {
   private lastReceiveTime = 0;
   private lastSenderTs = 0;
 
-  constructor(canvas: HTMLCanvasElement, onLog?: (msg: string) => void, onRequestKeyframe?: (isPanic: boolean) => void) {
+  constructor(canvas: HTMLCanvasElement, onLog?: (msg: string) => void) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.onLog = onLog;
-    this.onRequestKeyframe = onRequestKeyframe;
     this.initDecoder();
   }
 
@@ -52,17 +49,7 @@ export class H264Decoder {
     try {
       this.decoder = new VideoDecoder({
         output: (frame) => {
-          // Always target portrait orientation
-          const isLandscape = frame.displayWidth > frame.displayHeight;
-          let angle = this.rotation;
-          
-          // If the source is landscape, we automatically rotate it to be portrait
-          // unless the user has already manually rotated it.
-          // This ensures "Always Vertical" as requested.
-          if (isLandscape && angle === 0) {
-            angle = 90; 
-          }
-
+          const angle = this.rotation;
           const isRotated = angle === 90 || angle === 270;
           const displayW = isRotated ? frame.displayHeight : frame.displayWidth;
           const displayH = isRotated ? frame.displayWidth : frame.displayHeight;
@@ -75,35 +62,31 @@ export class H264Decoder {
           this.ctx.save();
           this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
           this.ctx.rotate((angle * Math.PI) / 180);
-          this.ctx.scale(this.mirror ? -1 : 1, this.flipV ? -1 : 1);
+          if (this.mirror) this.ctx.scale(-1, 1);
           this.ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
           this.ctx.restore();
           frame.close();
         },
         error: (e) => {
-          if (this.onLog) this.onLog(`❌ Decoder error callback: ${e.message}`);
+          if (this.onLog) this.onLog(`\u274C Decoder: ${e.message}`);
         }
       });
-    } catch (e) {
-      if (this.onLog) this.onLog(`❌ Decoder init exception: ${e}`);
-    }
+    } catch (e) { }
   }
 
   private configure() {
     if (!this.decoder) return;
     try {
       this.decoder.configure({
-        codec: "avc1.42e01f", // Task 18: Switched to Baseline Profile for faster decoding
+        codec: "avc1.4d001f", // Task 17: Switched to Main Profile (matched with sender)
         optimizeForLatency: true
       });
       this.isConfigured = true;
-    } catch (e) {
-      if (this.onLog) this.onLog(`❌ Decoder configure exception: ${e}`);
-    }
+    } catch (e) { }
   }
 
   private isKeyFrame(data: Uint8Array): boolean {
-    for (let i = 0; i < Math.min(data.length - 4, 500); i++) {
+    for (let i = 0; i < Math.min(data.length - 4, 100); i++) {
         if (data[i] === 0 && data[i+1] === 0) {
             let offset = 0;
             if (data[i+2] === 1) offset = 3;
@@ -123,15 +106,6 @@ export class H264Decoder {
 
     const now = performance.now();
     const type = this.isKeyFrame(binary) ? 'key' : 'delta';
-    
-    // Automatic Keyframe Request: If we are waiting for a keyframe and get a delta, request one.
-    if (this.firstSenderTs === -1 && type === 'delta' && frameId % 30 === 0) {
-      if (this.onRequestKeyframe) this.onRequestKeyframe(false);
-    }
-
-    if (type === 'key' && this.onLog) {
-      this.onLog(`🔑 Keyframe detected: frameId=${frameId}, size=${binary.length}`);
-    }
 
     // Adaptive Jitter Logic (Jitter = variance in arrival time)
     if (this.lastSenderTs > 0) {
@@ -144,13 +118,10 @@ export class H264Decoder {
         const sorted = [...this.jitterLog].sort((a, b) => a - b);
         const p95 = sorted[Math.floor(sorted.length * 0.95)];
         
-        const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
-        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
-        
-        // Smooth targetDelay to avoid sudden jumps (pro-lags)
-        this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
-        
-        if (Math.abs(newTarget - this.targetDelay) > 40) {
+        // Adaptive targetDelay: estimatedOneWay + 40 + p95 * 1.3
+        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * 1.3)));
+        if (Math.abs(newTarget - this.targetDelay) > 20) {
+          this.targetDelay = newTarget;
           if (this.onLog) {
             this.onLog(`📊 Adapting targetDelay to ${Math.round(this.targetDelay)}ms (p95=${Math.round(p95)}ms, RTT=${Math.round(this.currentRtt)}ms)`);
           }
@@ -165,19 +136,9 @@ export class H264Decoder {
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
 
-    if (!this.isPlaying && this.jitterBuffer.length >= 1) { // Instant playback for responsiveness
+    if (!this.isPlaying && this.jitterBuffer.length >= 1) { // Trigger immediately if any frame
       this.isPlaying = true;
-      
-      // Check if there was a long gap
-      if (this.lastBufferEmptyTime > 0 && now - this.lastBufferEmptyTime > 3000) {
-        if (this.onLog) {
-          this.onLog(`🔄 Buffer empty for >3s, resetting sync (firstSenderTs=${this.firstSenderTs})`);
-        }
-        this.firstSenderTs = -1;
-        this.firstPlayoutTime = -1;
-      }
       this.lastBufferEmptyTime = 0;
-      
       if (this.onLog) this.onLog(`▶️ Starting playback, buffer: ${this.jitterBuffer.length}`);
       requestAnimationFrame(this.playNext);
     } 
@@ -192,51 +153,32 @@ export class H264Decoder {
     if (this.jitterBuffer.length === 0) {
       if (this.isPlaying) {
         this.isPlaying = false;
-        if (this.onLog) this.onLog(`⚠️ Buffer empty, stopping playback`);
+        if (this.onLog) this.onLog(`\u26A0\uFE0F Buffer empty, stopping playback`);
         this.lastBufferEmptyTime = now;
+      } else {
+        if (this.lastBufferEmptyTime > 0 && now - this.lastBufferEmptyTime > 3000) {
+          if (this.onLog) {
+            this.onLog(`🔄 Buffer empty for 3s, resetting sync (firstSenderTs=${this.firstSenderTs}, firstPlayoutTime=${Math.round(this.firstPlayoutTime)})`);
+          }
+          this.firstSenderTs = -1;
+          this.firstPlayoutTime = -1;
+          this.lastBufferEmptyTime = 0;
+        }
       }
-      // Do not call requestAnimationFrame here, let pushPacket restart it
+      requestAnimationFrame(this.playNext);
       return;
     }
 
     if (!this.isPlaying) {
       this.isPlaying = true;
       this.lastBufferEmptyTime = 0;
-      if (this.onLog) this.onLog(`▶ Resuming playback`);
+      if (this.onLog) this.onLog(`\u25B6\uFE06 Resuming playback`);
     }
 
     const packet = this.jitterBuffer[0];
     
-    // Fast Recovery: If buffer is very large (> 1s of video), skip to the latest keyframe
-    const bufferDuration = this.jitterBuffer.length * (1000 / 30); // Rough estimate
-    if (bufferDuration > 1000) {
-      let latestKeyIdx = -1;
-      for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
-        if (this.jitterBuffer[i].type === 'key') {
-          latestKeyIdx = i;
-          break;
-        }
-      }
-      
-      if (latestKeyIdx > 0) {
-        if (this.onLog) {
-          this.onLog(`🚀 FAST RECOVERY: Skipping ${latestKeyIdx} frames to latest keyframe (bufferDuration=${Math.round(bufferDuration)}ms)`);
-        }
-        // When fast recovery triggers, also request a fresh keyframe to ensure we stay in sync
-        if (this.onRequestKeyframe) this.onRequestKeyframe(true);
-        
-        this.jitterBuffer.splice(0, latestKeyIdx);
-        this.firstSenderTs = -1; // Reset sync to the new keyframe
-        requestAnimationFrame(this.playNext);
-        return;
-      }
-    }
-
     if (this.firstSenderTs === -1) {
       if (packet.type !== 'key') {
-        if (this.onLog && packet.frameId % 30 === 0) {
-          this.onLog(`🗑️ Dropping non-keyframe ${packet.frameId} (waiting for keyframe)`);
-        }
         this.jitterBuffer.shift();
         requestAnimationFrame(this.playNext);
         return;
@@ -248,18 +190,18 @@ export class H264Decoder {
     const videoTimeOffset = packet.senderTs - this.firstSenderTs;
     const targetPlayTime = this.firstPlayoutTime + videoTimeOffset + this.targetDelay;
     
-    // Catch-up: if delay is huge, don't just skip everything (which causes freeze).
-    // Instead, if we have a large buffer, play frames faster.
-    const dropThreshold = Math.max(800, this.targetDelay * 1.5 + this.currentRtt); // Reduced from 2000
-    const isPanic = now - targetPlayTime > dropThreshold;
-    const isBufferLarge = this.jitterBuffer.length > 15;
-    
-    if (isPanic || isBufferLarge) {
-      if (this.onLog && packet.frameId % 15 === 0) {
-        this.onLog(`🚨 CATCH-UP: frame ${packet.frameId} is ${Math.round(now - targetPlayTime)}ms late. Buffer=${this.jitterBuffer.length}. Playing immediately.`);
+    // Catch-up: soft catch-up based on targetDelay and RTT
+    const dropThreshold = this.targetDelay * 0.65 + this.currentRtt * 0.5;
+    if (now - targetPlayTime > dropThreshold) {
+      if (this.onLog) {
+        this.onLog(`⏭️ Skipping frame ${packet.frameId}: delay=${Math.round(now - targetPlayTime)}ms, threshold=${Math.round(dropThreshold)}ms, targetDelay=${Math.round(this.targetDelay)}`);
       }
-      // In panic or large buffer, we don't wait. We just decode and move to next frame.
-    } else if (now < targetPlayTime) {
+      this.jitterBuffer.shift();
+      requestAnimationFrame(this.playNext);
+      return;
+    }
+
+    if (now < targetPlayTime) {
       requestAnimationFrame(this.playNext);
       return;
     }
@@ -273,22 +215,15 @@ export class H264Decoder {
         data: packet.raw
       });
       if (this.onLog && packet.frameId % 30 === 0) {
-        this.onLog(`▶ Playing frame ${packet.frameId}: delay=${Math.round(now - targetPlayTime)}ms, targetDelay=${this.targetDelay}, buffer=${this.jitterBuffer.length}`);
+        this.onLog(`\u25B6\uFE0F Playing frame ${packet.frameId}: delay=${Math.round(now - targetPlayTime)}ms, targetDelay=${this.targetDelay}`);
       }
       this.decoder.decode(chunk);
-    } catch (e: any) {
-      if (this.onLog) this.onLog(`❌ Decode error: ${e.message}`);
+    } catch (e) {
+      if (this.onLog) this.onLog(`\u274C Decode error: ${e.message}`);
       this.firstSenderTs = -1;
     }
     
-    // If buffer is still large, play another frame in the same RAF (up to 2 frames per RAF)
-    if (this.jitterBuffer.length > 10) {
-       // We don't want to loop infinitely, so we just trigger another playNext immediately
-       // but limit it to avoid blocking the main thread too much.
-       setTimeout(() => this.playNext(performance.now()), 0);
-    } else {
-       requestAnimationFrame(this.playNext);
-    }
+    requestAnimationFrame(this.playNext);
   };
 
   public getStats() {
@@ -303,16 +238,18 @@ export class H264Decoder {
   public setRotation(degrees: number) {
     this.rotation = degrees % 360;
     
+    // iPhone front camera mirror + extra 180° compensation
+    if (/iPhone|iPad/.test(navigator.userAgent)) {
+      this.mirror = true;           // front camera is always mirrored
+      this.rotation = (this.rotation + 180) % 360;
+    }
+    
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.onLog) this.onLog(`🔄 Applied rotation: ${this.rotation}° (mirror=${this.mirror})`);
   }
 
   public setMirror(enabled: boolean) {
     this.mirror = enabled;
-  }
-
-  public setFlipV(enabled: boolean) {
-    this.flipV = enabled;
   }
 
   public updateRTT(rtt: number) {
@@ -328,7 +265,7 @@ export class H264Decoder {
       this.rttHistory = [median];
     }
 
-    const clamped = Math.min(median, 5000); // Increased from 800 to 5000
+    const clamped = Math.min(median, 800);
     this.lastRttSmoothed = this.lastRttSmoothed 
       ? this.lastRttSmoothed * 0.7 + clamped * 0.3 
       : clamped;

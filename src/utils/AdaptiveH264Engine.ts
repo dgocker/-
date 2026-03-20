@@ -4,7 +4,6 @@ import { encryptData } from './cryptoUtils';
 // Crypto Worker для выноса шифрования из основного потока
 let cryptoWorker: Worker | null = null;
 let cryptoWorkerReady = false;
-let cryptoWorkerInitPromise: Promise<void> | null = null;
 const pendingCryptoOps = new Map<number, { 
   resolve: (data: Uint8Array) => void; 
   reject: (err: Error) => void;
@@ -14,13 +13,9 @@ const pendingCryptoOps = new Map<number, {
 let cryptoOpId = 0;
 
 function initCryptoWorker(): Promise<void> {
-  if (cryptoWorkerInitPromise) return cryptoWorkerInitPromise;
-  
-  cryptoWorkerInitPromise = new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     try {
-      if (!cryptoWorker) {
-        cryptoWorker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
-      }
+      cryptoWorker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
       
       cryptoWorker.onmessage = (event) => {
         const { type, id, error } = event.data;
@@ -45,16 +40,13 @@ function initCryptoWorker(): Promise<void> {
       
       cryptoWorker.onerror = (err) => {
         cryptoWorkerReady = false;
-        cryptoWorkerInitPromise = null;
         reject(err);
       };
     } catch (e) {
       cryptoWorkerReady = false;
-      cryptoWorkerInitPromise = null;
       resolve(); 
     }
   });
-  return cryptoWorkerInitPromise;
 }
 
 async function encryptInWorker(key: CryptoKey, data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> {
@@ -116,10 +108,10 @@ export class AdaptiveH264Engine {
   private pacerTokens: number = 0;
   private lastPacerRun: number = performance.now();
 
-  private targetBitrate: number = 500_000; // Lowered initial target
+  private targetBitrate: number = 500_000;
   private lastConfiguredBitrate: number = 0;
-  private minBitrate: number = 200_000; // Lowered min bitrate
-  private maxBitrate: number = 4_000_000; // Lowered max bitrate
+  private minBitrate: number = 300_000;
+  private maxBitrate: number = 4_000_000;
   private tokenBucketBytes: number = (500_000 / 8) * 0.2; 
   private lastTokenUpdate: number = performance.now();
   private sessionStartTime: number = performance.now();
@@ -131,7 +123,6 @@ export class AdaptiveH264Engine {
   private droppedFramesRate: number = 0;
   private droppedFramesConsecutive: number = 0;
   private droppedWindowStart: number = performance.now();
-  private lastPendingReset: number = performance.now();
 
   private lastAIUpdate: number = performance.now();
   private lastLogTime: number = 0;
@@ -143,8 +134,6 @@ export class AdaptiveH264Engine {
   private bytesSentThisSecond: number = 0;
   private lastRateLog: number = 0;
   private lastPacerLog: number = 0;
-  private framesProcessedThisSecond: number = 0;
-  private realFps: number = 0;
   private lastCongestionUpdate: number = 0;
   private readonly CONGESTION_UPDATE_INTERVAL: number = 1000;
 
@@ -162,7 +151,7 @@ export class AdaptiveH264Engine {
 
   // New GCC-inspired metrics
   private delayTrend: number = 0;
-  private readonly OVERUSE_THRESHOLD: number = 10; // Lowered threshold for gradient
+  private readonly OVERUSE_THRESHOLD: number = 80;
   private readonly NORMAL_THRESHOLD: number = 25;
   private rttHistory: number[] = [];
   private lastSmoothedRtt: number = 0;
@@ -170,10 +159,6 @@ export class AdaptiveH264Engine {
   private probingStartTs: number = 0;
   private isProbing: boolean = false;
   private lastSteadyIncrease: number = 0;
-  
-  // Gradient tracking for bufferedAmount
-  private lastBufferedAmount: number = 0;
-  private bufferedGradient: number = 0;
 
   constructor(
     video: HTMLVideoElement, 
@@ -192,7 +177,7 @@ export class AdaptiveH264Engine {
     
     if (sharedSecret) {
       initCryptoWorker().catch(err => {
-        if (this.onLog) this.onLog(`⚠️ Crypto Worker init failed: ${err}`);
+        if (this.onLog) this.onLog(`\u26A0\uFE0F Crypto Worker init failed: ${err}`);
       });
     }
     this.initEncoder();
@@ -201,11 +186,38 @@ export class AdaptiveH264Engine {
   private initEncoder() {
     try {
       this.encoder = new VideoEncoder({
-        output: (chunk, metadata) => {
+        output: async (chunk, metadata) => {
           const startTime = performance.now();
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          this.processEncodedFrame(data, startTime);
+          try {
+            let finalData: Uint8Array = data;
+            if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
+
+            if (this.sharedSecret) {
+              const iv = crypto.getRandomValues(new Uint8Array(12));
+              finalData = await encryptInWorker(this.sharedSecret, data, iv).catch(err => {
+                return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
+              });
+            }
+          
+            const senderTs = Math.floor(performance.now() - this.sessionStartTime);
+            const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
+            for (const part of parts) {
+              this.sendQueue.push({
+                data: new Uint8Array(part),
+                enqueueTime: performance.now()
+              });
+            }
+            
+            this.encodeDurationLog.push(performance.now() - startTime);
+            if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
+            
+          } catch (e) {
+             // 
+          } finally {
+            this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+          }
         },
         error: (e) => {
           if (this.onLog) this.onLog(`❌ VideoEncoder error: ${e.message}`);
@@ -213,7 +225,6 @@ export class AdaptiveH264Engine {
         }
       });
     } catch (e) {
-      if (this.onLog) this.onLog(`❌ Encoder init exception: ${e}`);
       setTimeout(() => {
         if (this.isRunning && !this.encoder) this.initEncoder();
       }, 1000);
@@ -232,54 +243,8 @@ export class AdaptiveH264Engine {
         this.isConfigured = false;
         this.initEncoder();
         this.isRecovering = false;
-      } catch (err) {
-        if (this.onLog) this.onLog(`❌ Error recovering encoder: ${err}`);
-      }
+      } catch (err) {}
     }, 1000);
-  }
-
-  private async processEncodedFrame(data: Uint8Array, startTime: number) {
-    // === NEW: FRAME SIZE LIMITER (Complexity Protection) ===
-    if (data.length > 250000) {
-      if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length/1024)}KB). Dropping to prevent buffer bloat.`);
-      this.needsKeyframe = true;
-      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
-      this.applyBitrateToParams();
-      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
-      return;
-    }
-
-    try {
-      let finalData: Uint8Array = data;
-      if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
-
-      // === NEW: ACTUAL TOKEN CONSUMPTION ===
-      this.tokenBucketBytes -= data.length;
-
-      if (this.sharedSecret) {
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        finalData = await encryptInWorker(this.sharedSecret, data, iv).catch(err => {
-          return encryptData(this.sharedSecret, data) as Promise<Uint8Array>;
-        });
-      }
-    
-      const senderTs = Math.floor(performance.now() - this.sessionStartTime);
-      const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
-      for (const part of parts) {
-        this.sendQueue.push({
-          data: new Uint8Array(part),
-          enqueueTime: performance.now()
-        });
-      }
-      
-      this.encodeDurationLog.push(performance.now() - startTime);
-      if (this.encodeDurationLog.length > 30) this.encodeDurationLog.shift();
-      
-    } catch (e) {
-       if (this.onLog) this.onLog(`❌ VideoEncoder output processing error: ${e}`);
-    } finally {
-      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
-    }
   }
 
   private configureEncoder(width: number, height: number) {
@@ -287,32 +252,22 @@ export class AdaptiveH264Engine {
     
     try {
       this.encoder.configure({
-        codec: "avc1.42e01f", // Baseline Profile for instant encoding
+        codec: "avc1.4d001f", // Task 17: Switched to Main Profile (4d0)
         width: width,
         height: height,
         bitrate: this.targetBitrate,
-        bitrateMode: 'variable',
+        bitrateMode: 'constant',
         latencyMode: "realtime",
         // @ts-ignore
-        avc: { format: "annexb", key_frame_interval: 60 }
+        avc: { format: "annexb", key_frame_interval: 60 } // GOP: 60 (2s at 30fps)
       });
       this.currentWidth = width;
       this.currentHeight = height;
       this.isConfigured = true;
       this.needsKeyframe = true;
-      
-      // NEW: Clear the send queue when resolution changes.
-      // The old frames are likely stale and will just cause delay.
-      if (this.sendQueue.length > 0) {
-        if (this.onLog) this.onLog(`🧹 Clearing sendQueue (${this.sendQueue.length} frames) due to reconfiguration`);
-        this.sendQueue = [];
-      }
-      // Give a small boost for the new I-frame to pass through the pacer
-      this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000); 
-
-      if (this.onLog) this.onLog(`⚙️ Baseline Profile Config: ${width}x${height} @ ${Math.round(this.targetBitrate/1024)}k (GOP=60)`);
-    } catch (e: any) {
-      if (this.onLog) this.onLog(`❌ Encoder configuration failed: ${e}`);
+      if (this.onLog) this.onLog(`\u2699\uFE0F Main Profile Config: ${width}x${height} @ ${Math.round(this.targetBitrate/1024)}k`);
+    } catch (e) {
+      if (this.onLog) this.onLog(`\u274C Encoder configuration failed: ${e}`);
     }
   }
 
@@ -323,25 +278,22 @@ export class AdaptiveH264Engine {
     if (diffRatio >= 0.05) {
       try {
         this.encoder.configure({
-          codec: "avc1.42e01f", // Baseline Profile
+          codec: "avc1.4d001f", // Main Profile
           width: this.currentWidth,
           height: this.currentHeight,
           bitrate: this.targetBitrate,
-          bitrateMode: 'variable',
+          bitrateMode: 'constant',
           latencyMode: "realtime",
           // @ts-ignore
           avc: { format: "annexb", key_frame_interval: 60 }
         });
         this.lastConfiguredBitrate = this.targetBitrate;
-      } catch (e) {
-        if (this.onLog) this.onLog(`❌ Encoder configure exception: ${e}`);
-      }
+      } catch (e) { }
     }
 
     const kbps = this.targetBitrate / 1024;
-    if (kbps < 300) this.currentFps = 10;
-    else if (kbps < 600) this.currentFps = 15;
-    else if (kbps < 1200) this.currentFps = 24;
+    if (kbps < 500) this.currentFps = 15;
+    else if (kbps < 1000) this.currentFps = 24;
     else this.currentFps = 30;
   }
 
@@ -351,47 +303,20 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     const metrics = this.getNetworkMetrics();
     const buffered = metrics.bufferedAmount;
-    
-    // Calculate buffered gradient (derivative)
-    const dt = Math.max(1, now - this.lastCongestionUpdate);
-    if (dt > 100) {
-      const currentGradient = (buffered - this.lastBufferedAmount) / dt;
-      // Exponential moving average for gradient
-      this.bufferedGradient = this.bufferedGradient * 0.8 + currentGradient * 0.2;
-      this.lastBufferedAmount = buffered;
-      this.lastCongestionUpdate = now;
-    }
-
     const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
-    
-    // NEW: Proactive Bitrate Penalty based on buffer pressure
-    // This prevents TCP bufferbloat by reducing bitrate before the congestion panic triggers.
-    const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
-    const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
-    if (bufferPressure > 0.3) {
-        // If buffer is > 30% full, start reducing bitrate proportionally
-        const penalty = (bufferPressure - 0.3) * 0.6; // Max 42% reduction at 100% buffer
-        this.targetBitrate *= (1.0 - penalty);
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate);
-    }
     
     let stateChanged = false;
     const oldBitrate = this.targetBitrate;
 
-    // GCC Overuse Detection - Gradient based
-    // Instead of absolute buffered > 400000, we check if the buffer is actively growing (gradient > 0.5 bytes/ms)
-    // AND it's already somewhat large, OR RTT trend is spiking.
-    const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 100000;
-    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || isBufferGrowing || queueDelay > 600; // Increased from 400ms to 600ms for mobile
+    // GCC Overuse Detection
+    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || queueDelay > 180 || buffered > 180000;
     
     if (isOveruse) {
       if (this.aiState !== 'congested') {
          this.aiState = 'congested';
-         // Softer cut for extreme RTT (0.7 instead of 0.6)
-         const cutFactor = this.lastSmoothedRtt > 1000 ? 0.7 : 0.9;
-         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
+         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.83);
          stateChanged = true;
-         if (this.onLog) this.onLog(`🚨 GCC Overuse: trend=${this.delayTrend.toFixed(1)}, qDelay=${Math.round(queueDelay)}ms, RTT=${Math.round(this.lastSmoothedRtt)}ms, cutting to ${Math.round(this.targetBitrate/1024)}k`);
+         if (this.onLog) this.onLog(`🚨 GCC Overuse: trend=${this.delayTrend.toFixed(1)}, qDelay=${Math.round(queueDelay)}ms, cutting to ${Math.round(this.targetBitrate/1024)}k`);
       }
     } else {
       // Recovery or Steady
@@ -401,31 +326,27 @@ export class AdaptiveH264Engine {
       }
 
       if (this.aiState === 'recovery') {
-        // Faster recovery: multiplicative + additive
-        const recoveryFactor = this.lastSmoothedRtt < 250 ? 1.15 : 1.08; // Increased from 1.08/1.04
-        this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * recoveryFactor + 100000); // Increased additive boost 
-        
-        if (this.targetBitrate >= oldBitrate * 1.1 || this.lastSmoothedRtt < 150) { 
+        this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + 8000);
+        if (this.targetBitrate >= oldBitrate * 1.1) { // Exit recovery when we've grown a bit
            this.aiState = 'steady';
         }
       } else if (this.aiState === 'steady') {
-        // Steady state: faster growth if RTT is low
-        if (now - this.lastSteadyIncrease > 300) { 
-          const growthFactor = this.lastSmoothedRtt < 150 ? 1.10 : 1.05; 
-          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * growthFactor + 10000);
+        // Steady state: slow growth + periodic probing
+        if (now - this.lastSteadyIncrease > 800) {
+          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * 1.05);
           this.lastSteadyIncrease = now;
         }
 
         // Probing: quickly jump to test capacity
-        if (!this.isProbing && now - this.probingStartTs > 12000) { // Increased from 8s to 12s to be more stable
+        if (!this.isProbing && now - this.probingStartTs > 12000) {
           this.isProbing = true;
           this.probingStartTs = now;
-          if (this.onLog) this.onLog(`🔍 Probing network capacity (2.0x)...`);
+          if (this.onLog) this.onLog(`🔍 Probing network capacity (3.5x)...`);
         }
 
         if (this.isProbing) {
           if (now - this.probingStartTs < 250) {
-            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 2.0); // Reduced from 3.5x to 2.0x
+            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 3.5);
           } else {
             this.isProbing = false;
             this.probingStartTs = now; // Reset timer
@@ -444,19 +365,9 @@ export class AdaptiveH264Engine {
     this.lastRtt = rtt;
     
     // === NEW PROTECTION AGAINST ZOMBIE RTT (SPIKES) ===
-    // TCP hides packet loss via retransmissions, causing massive RTT spikes.
-    // We only cut bitrate if the buffer is ALSO growing (true congestion).
-    // If buffer is empty, it was just a transient packet loss, ignore the spike.
-    if (rtt > 500 && this.bufferedGradient > 0) { 
-      if (this.onLog) this.onLog(`🚨 EXTREME RTT SPIKE ${rtt}ms + Buffer Growth — dropping bitrate by 50% and flushing queue`);
-      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
-      this.sendQueue = []; // Force clear stale frames
-      this.applyBitrateToParams();
-      this.rttHistory = [this.lastSmoothedRtt || 200]; // return to last normal
-      return;
-    } else if (rtt > 500) {
-      if (this.onLog) this.onLog(`⚠️ RTT Spike ${rtt}ms but buffer draining (TCP loss). Ignoring.`);
-      this.rttHistory = [this.lastSmoothedRtt || 200]; // Ignore the spike in history
+    if (rtt > 2000) { // > 2s is likely a buffer artifact, not real network delay
+      if (this.onLog) this.onLog(`🚨 EXTREME RTT SPIKE ${rtt}ms — resetting history`);
+      this.rttHistory = [this.lastSmoothedRtt || 150]; // return to last normal
       return;
     }
 
@@ -466,13 +377,12 @@ export class AdaptiveH264Engine {
     const sorted = [...this.rttHistory].sort((a, b) => a - b);
     const medianRtt = sorted[Math.floor(sorted.length / 2)];
 
-    // Increased clamp to 5000ms to allow adaptation to extreme delays
-    const clampedRtt = Math.min(medianRtt, 5000); 
+    // Hard Cap for the median used in GCC calculations
+    const clampedRtt = Math.min(medianRtt, 800); 
 
-    // Asymmetric Smoothing: faster recovery when RTT drops
+    // Smoothed RTT (EMA with 0.7/0.3 weight to filter spikes)
     const prevSmoothed = this.lastSmoothedRtt || clampedRtt;
-    const alpha = (clampedRtt < prevSmoothed) ? 0.5 : 0.2; 
-    this.lastSmoothedRtt = prevSmoothed * (1 - alpha) + clampedRtt * alpha;
+    this.lastSmoothedRtt = prevSmoothed * 0.7 + clampedRtt * 0.3;
     
     // Delay Trend (Derivative)
     const dt = (now - this.lastUpdateTs) / 1000;
@@ -523,8 +433,7 @@ export class AdaptiveH264Engine {
       : 0;
 
     return {
-      fps: this.realFps,
-      targetFps: this.currentFps,
+      fps: this.currentFps,
       droppedFrames: this.droppedFrames,
       droppedFramesRate: this.droppedFramesRate,
       state: this.aiState === 'congested' ? 'Overuse' : 'Normal',
@@ -551,7 +460,7 @@ export class AdaptiveH264Engine {
     this.targetBitrate = 500_000;
     this.frameId = 0;
     this.applyBitrateToParams();
-    if (this.onLog) this.onLog(`🚀 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
+    if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
     this.pacerInterval = setInterval(() => this.runPacer(performance.now()), 10);
     this.rafId = requestAnimationFrame(this.loop);
   }
@@ -596,90 +505,45 @@ export class AdaptiveH264Engine {
 
     const timeDeltaMs = now - this.lastTokenUpdate;
     if (timeDeltaMs > 0) {
-      // Fill bucket based on target bitrate
       const tokensToAdd = (this.targetBitrate / 8) * (timeDeltaMs / 1000);
-      const maxBurst = (this.targetBitrate / 8) * 1.5; // 1.5s burst
+      const maxBurst = (this.targetBitrate / 8) * 2.0; 
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
-      
-      // === NEW: DEBT CAPPING ===
-      // Cap the debt to prevent long recovery times (e.g., 5-6 seconds) after a huge frame.
-      // If debt is too high, we just "forgive" some of it to allow recovery within ~0.2 second.
-      const maxDebt = -this.targetBitrate / 40; // Max 0.2 second of debt at current bitrate
-      if (this.tokenBucketBytes < maxDebt) {
-        this.tokenBucketBytes = maxDebt;
-      }
-      
       this.lastTokenUpdate = now;
     }
     
-    // Watchdog for pending frames to prevent permanent freeze
-    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) { 
-      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
-      this.handleEncoderError(); // This will re-init the encoder
-      this.lastPendingReset = now;
-    }
-
     const frameInterval = 1000 / this.currentFps;
     if (now - this.lastFrameTime >= frameInterval) {
-      // Fix rAF jitter drift: if we are way behind, snap to now. Otherwise, increment by interval to maintain steady FPS.
-      if (now - this.lastFrameTime > frameInterval * 2) {
-        this.lastFrameTime = now;
-      } else {
-        this.lastFrameTime += frameInterval;
-      }
-
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
+      const isInternalQueuePanic = this.sendQueue.length > 30 || queueBytes > 512000;
       
-      // Increased maxWsBuffer to 800KB for Android/Mobile to allow bursty I-frames
-      const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5); 
-      const isInternalQueuePanic = this.sendQueue.length > 80 || queueBytes > 2048000;
+      // resolution scaling
+      this.currentScale = 1.0;
       
-      // Resolution scaling based on RTT
-      if (this.lastSmoothedRtt > 1500) {
-        this.currentScale = 0.3;
-      } else if (this.lastSmoothedRtt > 800) {
-        this.currentScale = 0.5;
-      } else if (this.lastSmoothedRtt > 400) {
-        this.currentScale = 0.75;
-      } else {
-        this.currentScale = 1.0;
-      }
+      const possessesTokens = this.tokenBucketBytes >= 0; // Task 17: Credit-based (allow until 0)
       
-      // FPS is now strictly controlled by applyBitrateToParams to avoid conflicts
-      
-      if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) { 
+      if (bufferedAmount > 200000 || isInternalQueuePanic || !possessesTokens) { 
         this.droppedFrames++;
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
         if (this.droppedFramesConsecutive >= 3) this.needsKeyframe = true;
+        this.lastFrameTime = now;
         
-        if (this.onLog && this.frameId % 60 === 0) {
-          let reason = "";
-          if (bufferedAmount > maxWsBuffer) reason += `WS_BUF(${Math.round(bufferedAmount/1024)}K > ${Math.round(maxWsBuffer/1024)}K) `;
-          if (isInternalQueuePanic) reason += `Q_PANIC(${this.sendQueue.length}f, ${Math.round(queueBytes/1024)}K) `;
-          this.onLog(`Skipping frame: ${reason}`);
-        }
-
-        if ((isInternalQueuePanic || bufferedAmount > maxWsBuffer * 1.5) && now - this.lastCongestionTs > this.congestionCooldown) {
+        if ((isInternalQueuePanic || bufferedAmount > 300000) && now - this.lastCongestionTs > this.congestionCooldown) {
           if (this.onLog) {
             this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, qBytes=${Math.round(queueBytes/1024)}KB, wsBuf=${Math.round(bufferedAmount/1024)}KB, clearing all!`);
           }
           this.sendQueue = [];
-          // Don't zero out tokens completely, allow a small burst for the next I-frame
-          this.tokenBucketBytes = 20000; 
-          this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5); // Slightly less aggressive cut
+          this.tokenBucketBytes = 0;
+          this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.65);
           this.applyBitrateToParams();
           this.aiState = 'congested';
           this.lastCongestionTs = now;
         }
       } else {
+        this.lastFrameTime = now;
         const success = await this.processFrame(now);
-        if (success) {
-          this.framesProcessedThisSecond++;
-          this.droppedFramesConsecutive = 0;
-          this.lastPendingReset = now; // Activity detected
-        }
+        if (success) this.droppedFramesConsecutive = 0;
       }
     }
 
@@ -687,9 +551,6 @@ export class AdaptiveH264Engine {
       this.droppedFramesRate = this.droppedFramesWindow;
       this.droppedFramesWindow = 0;
       this.droppedWindowStart = now;
-      
-      this.realFps = this.framesProcessedThisSecond;
-      this.framesProcessedThisSecond = 0;
       
       const kbps = Math.round((this.bytesSentThisSecond * 8) / 1024);
       this.bytesSentThisSecond = 0;
@@ -715,39 +576,26 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
     
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(5000, bytesPerMs * 100); // 100ms burst (Micro-pacing)
+    const maxPacerBurst = Math.max(1500, bytesPerMs * 250); // 250ms burst
+    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * 1.8) * pacerDeltaMs);
     
-    // Multiplier determines how fast we drain the queue.
-    // We want to drain it smoothly, not in massive bursts that trigger TCP congestion.
-    const multiplier = this.sendQueue.length > 10 ? 1.8 : 1.1; // Smoother multiplier
-    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
-    
-    // Micro-pacing: Only send a small chunk at a time, even if we have tokens.
-    // This prevents TCP bufferbloat.
-    let bytesSentThisTick = 0;
-    // Increased from 64KB to 128KB per tick. 
-    const MAX_BYTES_PER_TICK = 131072; 
-
-    while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+    while (this.sendQueue.length > 0 && this.pacerTokens >= 0) {
       const chunk = this.sendQueue[0].data;
       this.ws.send(chunk);
       this.pacerTokens -= chunk.length;
       this.bytesSentThisSecond += chunk.length;
-      bytesSentThisTick += chunk.length;
       this.sendQueue.shift();
     }
   }
   
   private async processFrame(now: number): Promise<boolean> {
     if (this.onLog && this.frameId % 300 === 0) {
-      this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}, tokens=${Math.round(this.tokenBucketBytes/1024)}K`);
+      this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
     
-    // Increased pending limit to 8 to allow for complex frame spikes
-    if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3) {
-      if (this.onLog && this.frameId % 120 === 0) {
-         if (this.pendingFrames > 8) this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
-         else this.onLog(`⚠️ processFrame skipped: video state (paused=${this.video.paused}, ended=${this.video.ended}, readyState=${this.video.readyState})`);
+    if (this.pendingFrames > 3 || this.video.paused || this.video.ended || this.video.readyState < 2) {
+      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 3) {
+         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
       }
       return false;
     }
@@ -757,12 +605,6 @@ export class AdaptiveH264Engine {
     }
 
     try {
-      // Ensure the video element has a valid frame before constructing VideoFrame
-      if (this.video.videoWidth === 0 || this.video.videoHeight === 0) {
-        if (this.onLog && this.frameId % 120 === 0) this.onLog(`⚠️ processFrame skipped: video dimensions are 0`);
-        return false;
-      }
-
       const timestamp = Math.round(performance.now() * 1000);
       const frame = new VideoFrame(this.video, { timestamp });
       
@@ -778,12 +620,11 @@ export class AdaptiveH264Engine {
       }
       
       // Task 17: Don't force keyframe if congested (saves bits)
-      if (this.frameId % 90 === 0 && this.aiState !== 'congested') {
+      if (this.frameId % 60 === 0 && this.aiState !== 'congested') {
         this.needsKeyframe = true;
       }
 
-      if (this.encoder.encodeQueueSize > 4) {
-          if (this.onLog) this.onLog(`⚠️ Encoder queue full (${this.encoder.encodeQueueSize})`);
+      if (this.encoder.encodeQueueSize > 2) {
           frame.close(); 
           return false;
       }
@@ -794,7 +635,6 @@ export class AdaptiveH264Engine {
       frame.close();
       return true;
     } catch (e) {
-      if (this.onLog) this.onLog(`❌ Encoder encode exception: ${e}`);
       return false;
     }
   }
