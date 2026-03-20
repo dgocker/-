@@ -211,7 +211,7 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation: applyRemoteRotation, setRemoteMirror, setRemoteFlip, forceKeyframe, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted);
+  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation: applyRemoteRotation, setRemoteMirror, setRemoteFlip, forceKeyframe, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted, remoteRotation, remoteMirror, remoteFlip);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   

@@ -65,6 +65,8 @@ async function startServer() {
   wss.on('connection', (ws, request) => {
     const urlParams = new URLSearchParams(request.url?.split('?')[1] || '');
     const roomId = urlParams.get('room');
+    const senderId = Math.random().toString(36).substring(7);
+    (ws as any).id = senderId;
 
     if (!roomId) {
       ws.close();
@@ -83,10 +85,20 @@ async function startServer() {
     ws.on('message', (message, isBinary) => {
       const roomClients = rooms.get(roomId);
       if (roomClients) {
+        let relayedMessage = message;
+
+        if (isBinary) {
+          const senderIdBuffer = Buffer.from((ws as any).id || 'unknown');
+          const senderIdLength = Buffer.alloc(1);
+          senderIdLength.writeUInt8(senderIdBuffer.length);
+          const dataBuffer = Buffer.isBuffer(message) ? message : Buffer.from(message as any);
+          relayedMessage = Buffer.concat([senderIdLength, senderIdBuffer, dataBuffer]);
+        }
+
         roomClients.forEach((client) => {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
             try {
-              client.send(message, { binary: isBinary });
+              client.send(relayedMessage, { binary: isBinary });
             } catch (e) {
               console.error('Relay send error:', e);
               client.terminate();

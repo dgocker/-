@@ -19,7 +19,7 @@ export class H264Decoder {
   private isConfigured = false;
   private rotation: number = 0;
   private mirror: boolean = false;
-  private flip: boolean = false;
+  private flipV: boolean = false;
 
   private currentRtt: number = 0;
   private estimatedOneWay: number = 0;
@@ -28,7 +28,7 @@ export class H264Decoder {
 
   // Adaptive Jitter Buffer (Task 18 & Jitter Fix)
   private readonly MAX_DELAY = 2000;
-  private readonly MIN_DELAY = 100;
+  private readonly MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 80;
   private readonly CATCH_UP_THRESHOLD = 600;
 
   private firstSenderTs = -1;
@@ -72,18 +72,20 @@ export class H264Decoder {
           this.ctx.save();
           this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
           this.ctx.rotate((angle * Math.PI) / 180);
-          if (this.mirror || this.flip) {
-            this.ctx.scale(this.mirror ? -1 : 1, this.flip ? -1 : 1);
+          if (this.mirror || this.flipV) {
+            this.ctx.scale(this.mirror ? -1 : 1, this.flipV ? -1 : 1);
           }
           this.ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
           this.ctx.restore();
           frame.close();
         },
         error: (e) => {
-          if (this.onLog) this.onLog(`\u274C Decoder: ${e.message}`);
+          if (this.onLog) this.onLog(`\u274C Decoder error callback: ${e.message}`);
         }
       });
-    } catch (e) { }
+    } catch (e: any) {
+      if (this.onLog) this.onLog(`❌ Decoder init exception: ${e.message}`);
+    }
   }
 
   private configure() {
@@ -94,7 +96,9 @@ export class H264Decoder {
         optimizeForLatency: true
       });
       this.isConfigured = true;
-    } catch (e) { }
+    } catch (e: any) {
+      if (this.onLog) this.onLog(`❌ Decoder configuration failed: ${e.message}`);
+    }
   }
 
   private isKeyFrame(data: Uint8Array): boolean {
@@ -140,9 +144,8 @@ export class H264Decoder {
         const p95 = sorted[Math.floor(sorted.length * 0.95)];
 
         const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
-        const MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 80;
         
-        const newTarget = Math.min(800, Math.max(MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
+        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
         this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
       }
     }
@@ -282,8 +285,8 @@ export class H264Decoder {
     this.mirror = enabled;
   }
 
-  public setFlip(enabled: boolean) {
-    this.flip = enabled;
+  public setFlipV(enabled: boolean) {
+    this.flipV = enabled;
   }
 
   public updateRTT(rtt: number) {

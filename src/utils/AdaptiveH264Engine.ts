@@ -46,10 +46,12 @@ function initCryptoWorker(): Promise<void> {
 
       cryptoWorker.onerror = (err) => {
         cryptoWorkerReady = false;
+        cryptoWorkerInitPromise = null; // FIX: allow retry
         reject(err);
       };
     } catch (e) {
       cryptoWorkerReady = false;
+      cryptoWorkerInitPromise = null; // FIX: allow retry
       resolve();
     }
   });
@@ -152,7 +154,7 @@ export class AdaptiveH264Engine {
   private lastAbrBitrate: number = 500_000;
   private lastBufferedAmount: number = 0;
   private bufferedGradient: number = 0;
-  private lastPendingReset: number = 0; // Task: Watchdog refinement
+  private lastPendingReset: number = performance.now(); // FIX: Watchdog refinement
 
   // PI Controller for RTT-based adaptation
   private rttTarget = 150; // target RTT in ms
@@ -331,8 +333,9 @@ export class AdaptiveH264Engine {
     }
 
     const kbps = this.targetBitrate / 1024;
-    if (kbps < 500) this.currentFps = 15;
-    else if (kbps < 1000) this.currentFps = 24;
+    if (kbps < 300) this.currentFps = 10;
+    else if (kbps < 600) this.currentFps = 15;
+    else if (kbps < 1200) this.currentFps = 24;
     else this.currentFps = 30;
   }
 
@@ -583,7 +586,7 @@ export class AdaptiveH264Engine {
     }
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
-    if (this.pendingFrames > 0 && now - (this.lastPendingReset || this.sessionStartTime) > 1500) { 
+    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) { 
       if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
       this.handleEncoderError(); 
       this.lastPendingReset = now;
@@ -694,7 +697,7 @@ export class AdaptiveH264Engine {
       this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3) {
+    if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 6) {
         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
       }

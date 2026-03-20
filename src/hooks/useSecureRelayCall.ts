@@ -15,7 +15,10 @@ export function useSecureRelayCall(
   remoteVideoRef: React.RefObject<HTMLVideoElement | null>,
   setAutoplayFailed: (failed: boolean) => void,
   addLog: (msg: string) => void,
-  isAudioMuted: boolean
+  isAudioMuted: boolean,
+  remoteRotation: number,
+  remoteMirror: boolean,
+  remoteFlipV: boolean
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '', fps: 0, quality: 0, scale: 0, droppedFrames: 0, netState: 'Normal' });
@@ -135,7 +138,7 @@ export function useSecureRelayCall(
   }, []);
 
   const setRemoteFlip = useCallback((enabled: boolean) => {
-    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.setFlip(enabled));
+    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.setFlipV(enabled));
   }, []);
 
   const forceKeyframe = useCallback(() => {
@@ -335,8 +338,8 @@ export function useSecureRelayCall(
         const ctx = receiverAudioContextRef.current!;
         if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
-          const statsEntries = Object.entries(h264DecodersRef.current).map(([sid, decoder]) => ({ sid, ...((decoder as H264Decoder).getStats()) }));
-          const stats = statsEntries[0]; // For stats display, just pick one (usually there's only one remote sender)
+          const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
+          const stats = firstDecoder?.getStats(); 
 
           if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
@@ -368,11 +371,11 @@ export function useSecureRelayCall(
 
           // Идеальное расписание из тестового приложения
           const currentTime = ctx.currentTime;
-          if (nextPlayTime < currentTime) {
-            nextPlayTime = currentTime + 0.04;
+          if (nextPlayTimeRef.current < currentTime) {
+            nextPlayTimeRef.current = currentTime + 0.04;
           }
-          source.start(nextPlayTime);
-          nextPlayTime += audioBuffer.duration;
+          source.start(nextPlayTimeRef.current);
+          nextPlayTimeRef.current += audioBuffer.duration;
 
           audioJitterBufferRef.current.shift();
 
@@ -836,6 +839,9 @@ export function useSecureRelayCall(
                     if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                   }
                 });
+                h264DecodersRef.current[senderId].setRotation(remoteRotation);
+                h264DecodersRef.current[senderId].setMirror(remoteMirror);
+                h264DecodersRef.current[senderId].setFlipV(remoteFlipV);
               }
 
               if (h264DecodersRef.current[senderId]) {
@@ -904,6 +910,9 @@ export function useSecureRelayCall(
                     if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                   }
                 });
+                h264DecodersRef.current[senderId].setRotation(remoteRotation);
+                h264DecodersRef.current[senderId].setMirror(remoteMirror);
+                h264DecodersRef.current[senderId].setFlipV(remoteFlipV);
               }
 
               if (h264DecodersRef.current[senderId]) {
