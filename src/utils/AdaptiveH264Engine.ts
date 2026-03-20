@@ -150,6 +150,7 @@ export class AdaptiveH264Engine {
   private lastAbrBitrate: number = 500_000;
   private lastBufferedAmount: number = 0;
   private bufferedGradient: number = 0;
+  private lastPendingReset: number = 0; // Task: Watchdog refinement
 
   // PI Controller for RTT-based adaptation
   private rttTarget = 150; // target RTT in ms
@@ -580,10 +581,10 @@ export class AdaptiveH264Engine {
     }
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
-    if (this.pendingFrames > 0 && now - this.lastEncodeTs > 1500) { 
-      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck. Force resetting encoder...`);
+    if (this.pendingFrames > 0 && now - (this.lastPendingReset || this.sessionStartTime) > 1500) { 
+      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
       this.handleEncoderError(); 
-      this.lastEncodeTs = now;
+      this.lastPendingReset = now;
     }
 
     const frameInterval = 1000 / this.currentFps;

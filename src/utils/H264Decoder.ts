@@ -34,6 +34,7 @@ export class H264Decoder {
   private firstSenderTs = -1;
   private firstPlayoutTime = -1;
   private lastBufferEmptyTime = 0;
+  private dropThreshold = 2000;
 
   // Statistical Jitter tracking (Task 17)
   private jitterLog: number[] = [];
@@ -217,8 +218,8 @@ export class H264Decoder {
     const videoTimeOffset = packet.senderTs - this.firstSenderTs;
     const targetPlayTime = this.firstPlayoutTime + videoTimeOffset + this.targetDelay;
 
-    const dropThreshold = Math.max(800, this.targetDelay * 1.5 + this.currentRtt);
-    const isPanic = now - targetPlayTime > dropThreshold;
+    this.dropThreshold = Math.max(800, this.targetDelay * 1.5 + this.currentRtt);
+    const isPanic = now - targetPlayTime > this.dropThreshold;
     const isBufferLarge = this.jitterBuffer.length > 15;
 
     if (isPanic || isBufferLarge) {
@@ -255,7 +256,8 @@ export class H264Decoder {
       targetDelay: Math.round(this.targetDelay),
       bufferLength: this.jitterBuffer.length,
       firstSenderTs: this.firstSenderTs,
-      firstPlayoutTime: this.firstPlayoutTime
+      firstPlayoutTime: this.firstPlayoutTime,
+      dropThreshold: this.dropThreshold
     };
   }
 

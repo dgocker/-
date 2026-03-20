@@ -23,7 +23,7 @@ export function useSecureRelayCall(
   const rttRef = useRef<number>(0);
   const [isFallbackMode, setIsFallbackMode] = useState<boolean>(false);
   const remoteCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const h264DecoderRef = useRef<H264Decoder | null>(null);
+  const h264DecodersRef = useRef<{ [senderId: string]: H264Decoder }>({});
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const queueRef = useRef<Uint8Array[]>([]);
@@ -124,18 +124,18 @@ export function useSecureRelayCall(
   };
 
   const applyRotation = useCallback((angle: number) => {
-    if (h264DecoderRef.current) h264DecoderRef.current.setRotation(angle);
+    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.setRotation(angle));
     if (remoteVideoRef.current) {
       remoteVideoRef.current.style.transform = `rotate(${angle}deg)`;
     }
   }, [remoteVideoRef]);
 
   const setRemoteMirror = useCallback((enabled: boolean) => {
-    if (h264DecoderRef.current) h264DecoderRef.current.setMirror(enabled);
+    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.setMirror(enabled));
   }, []);
 
   const setRemoteFlip = useCallback((enabled: boolean) => {
-    if (h264DecoderRef.current) h264DecoderRef.current.setFlip(enabled);
+    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.setFlip(enabled));
   }, []);
 
   const forceKeyframe = useCallback(() => {
@@ -167,10 +167,8 @@ export function useSecureRelayCall(
       adaptiveEngineRef.current.stop();
       adaptiveEngineRef.current = null;
     }
-    if (h264DecoderRef.current) {
-      h264DecoderRef.current.destroy();
-      h264DecoderRef.current = null;
-    }
+    (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.destroy());
+    h264DecodersRef.current = {};
     setIsFallbackMode(false);
     if (fallbackVideoRef.current) {
       fallbackVideoRef.current.srcObject = null;
@@ -337,7 +335,8 @@ export function useSecureRelayCall(
         const ctx = receiverAudioContextRef.current!;
         if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
-          const stats = h264DecoderRef.current?.getStats();
+          const statsEntries = Object.entries(h264DecodersRef.current).map(([sid, decoder]) => ({ sid, ...((decoder as H264Decoder).getStats()) }));
+          const stats = statsEntries[0]; // For stats display, just pick one (usually there's only one remote sender)
 
           if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
@@ -760,7 +759,7 @@ export function useSecureRelayCall(
             rttRef.current = rtt;
             setStats(prev => ({ ...prev, rtt }));
             if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
-            if (h264DecoderRef.current) h264DecoderRef.current.updateRTT(rtt);
+            (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
             return;
           }
           if (msg.type === 'rotation') {
@@ -778,14 +777,15 @@ export function useSecureRelayCall(
       } else if (event.data instanceof ArrayBuffer) {
         const view = new Uint8Array(event.data);
         const senderIdLength = view[0];
-        const originalData = event.data.slice(1 + senderIdLength); // Отрезаем Sender ID
+        const senderId = new TextDecoder().decode(view.slice(1, 1 + senderIdLength));
+        const originalData = event.data.slice(1 + senderIdLength);
 
         bytesReceivedRef.current += originalData.byteLength;
         const part = new Uint8Array(originalData);
 
         if (part[0] === 1 || part[0] === 3) {
           try {
-            const paddingInfo = removePadding(event.data);
+            const paddingInfo = removePadding(originalData);
             let audioData: ArrayBuffer | Uint8Array = paddingInfo.data;
             if (part[0] === 3 && sharedSecretRef.current) {
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
@@ -819,17 +819,21 @@ export function useSecureRelayCall(
               }
 
               if (!firstJpegReceivedRef.current) {
-                addLog(`🔐 First E2EE video frame decrypted successfully`);
+                addLog(`🔐 First E2EE video frame from ${senderId} decrypted successfully`);
                 firstJpegReceivedRef.current = true;
               }
 
-              if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
+              if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
+                h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe' }));
-                    if (isPanic) addLog('📡 PANIC: Sent requestKeyframe to peer');
+                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe', senderId }));
+                    if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                   }
                 });
+              }
+
+              if (h264DecodersRef.current[senderId]) {
+                h264DecodersRef.current[senderId].pushPacket(clean, frameId, 30, senderTs);
               }
 
               setIsFallbackMode(true);
@@ -841,14 +845,15 @@ export function useSecureRelayCall(
         const arrayBuffer = await (event.data as Blob).arrayBuffer();
         const view = new Uint8Array(arrayBuffer);
         const senderIdLength = view[0];
-        const originalData = arrayBuffer.slice(1 + senderIdLength); // Отрезаем Sender ID
+        const senderId = new TextDecoder().decode(view.slice(1, 1 + senderIdLength));
+        const originalData = arrayBuffer.slice(1 + senderIdLength);
 
         bytesReceivedRef.current += originalData.byteLength;
         const part = new Uint8Array(originalData);
 
         if (part[0] === 1 || part[0] === 3) {
           try {
-            const { data, senderTs } = removePadding(arrayBuffer);
+            const { data, senderTs } = removePadding(originalData);
             let audioData: ArrayBuffer | Uint8Array = data;
             if (part[0] === 3 && sharedSecretRef.current) {
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
@@ -869,7 +874,7 @@ export function useSecureRelayCall(
 
           if (obfBufferRef.current[frameId].length === totalParts) {
             if (frameId % 30 === 0) {
-              addLog(`\uD83D\uDCAF Video frame parts (Blob): frameId=${frameId}, total=${totalParts}, received=${obfBufferRef.current[frameId].length}`);
+              addLog(`💯 Video frame parts (Blob): frameId=${frameId}, total=${totalParts}, sender=${senderId}`);
             }
             const chunksToProcess = obfBufferRef.current[frameId];
             delete obfBufferRef.current[frameId];
@@ -881,16 +886,20 @@ export function useSecureRelayCall(
                 } catch (e) { return; }
               }
               if (!firstJpegReceivedRef.current) {
-                addLog(`🔐 First E2EE video frame decrypted successfully`);
+                addLog(`🔐 First E2EE video frame from ${senderId} decrypted successfully`);
                 firstJpegReceivedRef.current = true;
               }
-              if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
+              if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
+                h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe' }));
-                    if (isPanic) addLog('📡 PANIC: Sent requestKeyframe to peer');
+                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe', senderId }));
+                    if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                   }
                 });
+              }
+
+              if (h264DecodersRef.current[senderId]) {
+                h264DecodersRef.current[senderId].pushPacket(clean, frameId, 30, senderTs);
               }
 
               setIsFallbackMode(true);
