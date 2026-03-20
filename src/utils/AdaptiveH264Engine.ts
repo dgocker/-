@@ -256,9 +256,10 @@ export class AdaptiveH264Engine {
           }
 
           try {
-            let finalData: Uint8Array = data;
-            if (this.onLog && this.frameId % 30 === 0) this.onLog(`✅ Encoded frame ${this.frameId} (size=${data.length})`);
+            const currentFrameId = this.frameId++;
+            if (this.onLog && currentFrameId % 30 === 0) this.onLog(`✅ Encoded frame ${currentFrameId} (size=${data.length})`);
 
+            let finalData: Uint8Array = data;
             if (this.sharedSecret) {
               const iv = crypto.getRandomValues(new Uint8Array(12));
               finalData = await this.encryptInWorker(this.sharedSecret, data, iv).catch(err => {
@@ -267,7 +268,7 @@ export class AdaptiveH264Engine {
             }
           
             const senderTs = Math.floor(performance.now() - this.sessionStartTime);
-            const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
+            const parts = await obfuscateSplit(finalData, currentFrameId, senderTs);
             for (const part of parts) {
               const u8Part = new Uint8Array(part);
               this.totalQueueBytes += u8Part.length;
@@ -748,10 +749,10 @@ export class AdaptiveH264Engine {
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
     const maxPacerBurst = Math.max(1500, bytesPerMs * 250); // 250ms burst
     
-    // FIX: PACER ENHANCEMENT (Backported Smooth Multiplier)
-    const multiplier = this.sendQueue.length > 10 ? 1.8 : 1.1; 
-    const effectiveRate = Math.max(1500_000, this.targetBitrate);
-    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + ((effectiveRate / 8) / 1000 * multiplier) * pacerDeltaMs);
+    // Phase 4 Fix: Don't use a fixed 1.5M floor, it chokes slow connections
+    const multiplier = this.sendQueue.length > 15 ? 1.5 : 1.1; 
+    const effectiveRate = this.targetBitrate * multiplier;
+    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (effectiveRate / 8 / 1000) * pacerDeltaMs);
     
     let bytesSentThisTick = 0;
     const MAX_BYTES_PER_TICK = this.getMaxBytesPerTick();
@@ -783,8 +784,8 @@ export class AdaptiveH264Engine {
     }
     
     if (this.pendingFrames > 3 || this.video.paused || this.video.ended || this.video.readyState < 2) {
-      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 3) {
-         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
+      if (this.onLog && (this.frameId % 300 === 0 || this.pendingFrames > 3)) {
+         this.onLog(`⚠️ processFrame skipped: pending=${this.pendingFrames}, state=${this.video.readyState}, paused=${this.video.paused}`);
       }
       return false;
     }
