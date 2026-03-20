@@ -98,7 +98,7 @@ export class H264Decoder {
   }
 
   private isKeyFrame(data: Uint8Array): boolean {
-    for (let i = 0; i < Math.min(data.length - 4, 100); i++) {
+    for (let i = 0; i < Math.min(data.length - 4, 500); i++) {
       if (data[i] === 0 && data[i + 1] === 0) {
         let offset = 0;
         if (data[i + 2] === 1) offset = 3;
@@ -154,9 +154,19 @@ export class H264Decoder {
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
 
-    if (!this.isPlaying && this.jitterBuffer.length >= 1) { // Trigger immediately if any frame
+    if (!this.isPlaying && this.jitterBuffer.length >= 1) {
       this.isPlaying = true;
+      
+      // Check if there was a long gap
+      if (this.lastBufferEmptyTime > 0 && now - this.lastBufferEmptyTime > 3000) {
+        if (this.onLog) {
+          this.onLog(`🔄 Buffer empty for >3s, resetting sync (firstSenderTs=${this.firstSenderTs})`);
+        }
+        this.firstSenderTs = -1;
+        this.firstPlayoutTime = -1;
+      }
       this.lastBufferEmptyTime = 0;
+      
       if (this.onLog) this.onLog(`▶️ Starting playback, buffer: ${this.jitterBuffer.length}`);
       requestAnimationFrame(this.playNext);
     }

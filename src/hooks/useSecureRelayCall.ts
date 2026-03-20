@@ -833,7 +833,9 @@ export function useSecureRelayCall(
               }
 
               if (h264DecodersRef.current[senderId]) {
-                h264DecodersRef.current[senderId].pushPacket(clean, frameId, 30, senderTs);
+                const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
+                // @ts-ignore
+                h264DecodersRef.current[senderId].pushPacket(clean, frameId, currentFps, senderTs);
               }
 
               setIsFallbackMode(true);
@@ -899,7 +901,9 @@ export function useSecureRelayCall(
               }
 
               if (h264DecodersRef.current[senderId]) {
-                h264DecodersRef.current[senderId].pushPacket(clean, frameId, 30, senderTs);
+                const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
+                // @ts-ignore
+                h264DecodersRef.current[senderId].pushPacket(clean, frameId, currentFps, senderTs);
               }
 
               setIsFallbackMode(true);

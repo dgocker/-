@@ -131,6 +131,8 @@ export class AdaptiveH264Engine {
   private droppedFramesRate: number = 0;
   private droppedFramesConsecutive: number = 0;
   private droppedWindowStart: number = performance.now();
+  private realFps: number = 0;
+  private framesProcessedThisSecond: number = 0;
 
   private lastAIUpdate: number = performance.now();
   private lastLogTime: number = 0;
@@ -496,7 +498,7 @@ export class AdaptiveH264Engine {
       : 0;
 
     return {
-      fps: this.currentFps,
+      fps: this.realFps,
       droppedFrames: this.droppedFrames,
       droppedFramesRate: this.droppedFramesRate,
       state: this.aiState === 'congested' ? 'Overuse' : 'Normal',
@@ -617,7 +619,6 @@ export class AdaptiveH264Engine {
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
         if (this.droppedFramesConsecutive >= 3) this.needsKeyframe = true;
-        this.lastFrameTime = now;
 
         if ((isInternalQueuePanic || bufferedAmount > maxWsBuffer * 1.5) && now - this.lastCongestionTs > this.congestionCooldown) {
           if (this.onLog) {
@@ -635,13 +636,18 @@ export class AdaptiveH264Engine {
           this.lastCongestionTs = now;
         }
       } else {
-        this.lastFrameTime = now;
         const success = await this.processFrame(now);
-        if (success) this.droppedFramesConsecutive = 0;
+        if (success) {
+          this.framesProcessedThisSecond++;
+          this.droppedFramesConsecutive = 0;
+          this.lastPendingReset = now; // Activity detected
+        }
       }
     }
 
     if (now - this.droppedWindowStart >= 1000) {
+      this.realFps = this.framesProcessedThisSecond;
+      this.framesProcessedThisSecond = 0;
       this.droppedFramesRate = this.droppedFramesWindow;
       this.droppedFramesWindow = 0;
       this.droppedWindowStart = now;
@@ -695,13 +701,6 @@ export class AdaptiveH264Engine {
     if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3) {
       if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 6) {
         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
-      }
-
-      // Attempt 8: Encoder Watchdog Reset
-      if (this.pendingFrames > 0 && now - this.lastEncodeTs > 2000) {
-        if (this.onLog) this.onLog(`🚨 Encoder HANG detected (2s timeout), performing full reset!`);
-        this.handleEncoderError(); // This performs reset
-        this.lastEncodeTs = now;
       }
 
       return false;
