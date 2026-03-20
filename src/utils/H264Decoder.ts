@@ -18,6 +18,7 @@ export class H264Decoder {
   private isConfigured = false;
   private rotation: number = 0; 
   private mirror: boolean = false;
+  private flip: boolean = false; 
   
   private currentRtt: number = 0;
   private estimatedOneWay: number = 0;
@@ -49,7 +50,13 @@ export class H264Decoder {
     try {
       this.decoder = new VideoDecoder({
         output: (frame) => {
-          const angle = this.rotation;
+          let angle = this.rotation;
+          
+          // Attempt 9: Always Vertical Fix
+          if (angle === 0 && frame.displayWidth > frame.displayHeight) {
+            angle = 90;
+          }
+
           const isRotated = angle === 90 || angle === 270;
           const displayW = isRotated ? frame.displayHeight : frame.displayWidth;
           const displayH = isRotated ? frame.displayWidth : frame.displayHeight;
@@ -62,7 +69,9 @@ export class H264Decoder {
           this.ctx.save();
           this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
           this.ctx.rotate((angle * Math.PI) / 180);
-          if (this.mirror) this.ctx.scale(-1, 1);
+          if (this.mirror || this.flip) {
+            this.ctx.scale(this.mirror ? -1 : 1, this.flip ? -1 : 1);
+          }
           this.ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
           this.ctx.restore();
           frame.close();
@@ -78,7 +87,7 @@ export class H264Decoder {
     if (!this.decoder) return;
     try {
       this.decoder.configure({
-        codec: "avc1.4d001f", // Task 17: Switched to Main Profile (matched with sender)
+        codec: "avc1.42e01f", // Attempt 4: Baseline Profile
         optimizeForLatency: true
       });
       this.isConfigured = true;
@@ -118,13 +127,12 @@ export class H264Decoder {
         const sorted = [...this.jitterLog].sort((a, b) => a - b);
         const p95 = sorted[Math.floor(sorted.length * 0.95)];
         
-        // Adaptive targetDelay: estimatedOneWay + 40 + p95 * 1.3
+        // Attempt 10: Smooth Target Delay (0.9 old + 0.1 new)
         const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * 1.3)));
-        if (Math.abs(newTarget - this.targetDelay) > 20) {
-          this.targetDelay = newTarget;
-          if (this.onLog) {
-            this.onLog(`📊 Adapting targetDelay to ${Math.round(this.targetDelay)}ms (p95=${Math.round(p95)}ms, RTT=${Math.round(this.currentRtt)}ms)`);
-          }
+        this.targetDelay = this.targetDelay * 0.9 + newTarget * 0.1;
+        
+        if (this.onLog && Math.abs(newTarget - this.targetDelay) > 100) {
+          this.onLog(`📊 Smoothing targetDelay to ${Math.round(this.targetDelay)}ms (p95=${Math.round(p95)}ms, RTT=${Math.round(this.currentRtt)}ms)`);
         }
       }
     }
@@ -135,6 +143,20 @@ export class H264Decoder {
     const packet: VideoPacket = { frameId, receiveTime: now, senderTs, raw: binary, type };
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
+
+    // Attempt 8/9: Fast Recovery (Instant Unfreeze)
+    // If the jitter buffer exceeds 1s of video, skip to the latest keyframe.
+    if (this.jitterBuffer.length > 0) {
+      const bufferDuration = this.jitterBuffer[this.jitterBuffer.length - 1].senderTs - this.jitterBuffer[0].senderTs;
+      if (bufferDuration > 1000) {
+        const lastKeyIdx = this.jitterBuffer.map(p => p.type).lastIndexOf('key');
+        if (lastKeyIdx > 0) {
+          if (this.onLog) this.onLog(`⏭️ Fast Recovery: Buffer duration ${Math.round(bufferDuration)}ms > 1000ms, skipping to latest keyframe`);
+          this.jitterBuffer = this.jitterBuffer.slice(lastKeyIdx);
+          this.firstSenderTs = -1; // Reset sync
+        }
+      }
+    }
 
     if (!this.isPlaying && this.jitterBuffer.length >= 1) { // Trigger immediately if any frame
       this.isPlaying = true;
@@ -190,20 +212,27 @@ export class H264Decoder {
     const videoTimeOffset = packet.senderTs - this.firstSenderTs;
     const targetPlayTime = this.firstPlayoutTime + videoTimeOffset + this.targetDelay;
     
-    // Catch-up: soft catch-up based on targetDelay and RTT
-    const dropThreshold = this.targetDelay * 0.65 + this.currentRtt * 0.5;
-    if (now - targetPlayTime > dropThreshold) {
-      if (this.onLog) {
-        this.onLog(`⏭️ Skipping frame ${packet.frameId}: delay=${Math.round(now - targetPlayTime)}ms, threshold=${Math.round(dropThreshold)}ms, targetDelay=${Math.round(this.targetDelay)}`);
+    // Attempt 4: Panic Catch-up
+    const delay = now - targetPlayTime;
+    if (delay > 2000) {
+      if (this.onLog) this.onLog(`🚀 Panic Catch-up: delay ${Math.round(delay)}ms > 2000ms, playing immediately!`);
+      // Play immediately (fall through to decode)
+    } else {
+      // Normal catch-up: soft catch-up based on targetDelay and RTT
+      const dropThreshold = this.targetDelay * 0.65 + this.currentRtt * 0.5;
+      if (delay > dropThreshold) {
+        if (this.onLog) {
+          this.onLog(`⏭️ Skipping frame ${packet.frameId}: delay=${Math.round(delay)}ms, threshold=${Math.round(dropThreshold)}ms`);
+        }
+        this.jitterBuffer.shift();
+        requestAnimationFrame(this.playNext);
+        return;
       }
-      this.jitterBuffer.shift();
-      requestAnimationFrame(this.playNext);
-      return;
-    }
 
-    if (now < targetPlayTime) {
-      requestAnimationFrame(this.playNext);
-      return;
+      if (now < targetPlayTime) {
+        requestAnimationFrame(this.playNext);
+        return;
+      }
     }
 
     this.jitterBuffer.shift();
@@ -250,6 +279,10 @@ export class H264Decoder {
 
   public setMirror(enabled: boolean) {
     this.mirror = enabled;
+  }
+
+  public setFlip(enabled: boolean) {
+    this.flip = enabled;
   }
 
   public updateRTT(rtt: number) {

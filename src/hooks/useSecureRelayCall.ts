@@ -123,37 +123,24 @@ export function useSecureRelayCall(
     }, 100); // 10 times a second for high-resolution logging
   };
 
-  useEffect(() => {
-    // Task: Fixed rotation for Android -> iPhone
-    const handler = () => {
-      const angle = screen.orientation?.angle ?? (window.orientation as number) ?? 0;
-      
-      if (socket?.connected && currentRoomIdRef.current) {
-        socket.emit('rotation', { roomId: currentRoomIdRef.current, angle });
-        addLog(`🔄 Sent rotation via socket: ${angle}`);
-      }
-
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'rotation', value: angle, sid: mySidRef.current }));
-        addLog(`🔄 Sent rotation via WS: ${angle}`);
-      }
-    };
-
-    window.addEventListener('orientationchange', handler);
-    // Also listen to screen orientation change for modern browsers (Android)
-    if (screen.orientation) {
-      screen.orientation.addEventListener('change', handler);
+  const applyRotation = useCallback((angle: number) => {
+    if (h264DecoderRef.current) h264DecoderRef.current.setRotation(angle);
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.style.transform = `rotate(${angle}deg)`;
     }
-    
-    if (connectionState === 'connected') handler();
+  }, [remoteVideoRef]);
 
-    return () => {
-      window.removeEventListener('orientationchange', handler);
-      if (screen.orientation) {
-        screen.orientation.removeEventListener('change', handler);
-      }
-    };
-  }, [socket, connectionState, addLog]);
+  const setRemoteMirror = useCallback((enabled: boolean) => {
+    if (h264DecoderRef.current) h264DecoderRef.current.setMirror(enabled);
+  }, []);
+
+  const setRemoteFlip = useCallback((enabled: boolean) => {
+    if (h264DecoderRef.current) h264DecoderRef.current.setFlip(enabled);
+  }, []);
+
+  const forceKeyframe = useCallback(() => {
+    if (adaptiveEngineRef.current) adaptiveEngineRef.current.forceKeyframe();
+  }, []);
 
   const cleanup = useCallback(() => {
     addLog('🧹 Cleaning up call resources...');
@@ -574,15 +561,8 @@ export function useSecureRelayCall(
   };
 
   const setRemoteSupportsWebM = (supports: boolean) => {
-    const changed = remoteSupportsWebMRef.current !== supports;
     remoteSupportsWebMRef.current = supports;
-    console.log('Remote supports WebM:', supports);
     addLog(`ℹ️ Remote supports WebM: ${supports}`);
-    
-    if (changed && connectionState === 'connected') {
-      addLog('🚀 Remote WebM support changed, restarting recording...');
-      startRecording();
-    }
   };
 
   const [secureEmojis, setSecureEmojis] = useState<string[]>(['🔒', '🛡️', '📡', '✨']);
@@ -796,12 +776,7 @@ export function useSecureRelayCall(
             return;
           }
           if (msg.type === 'rotation') {
-            if (h264DecoderRef.current) {
-              h264DecoderRef.current.setRotation(msg.value);
-            }
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.style.transform = `rotate(${msg.value}deg)`;
-            }
+            // Attempt 8: Ignore automatic rotation to prevent double-rotation
             return;
           }
         } catch (e) {}
@@ -965,14 +940,6 @@ export function useSecureRelayCall(
     }
   }, []);
 
-  const applyRotation = useCallback((angle: number) => {
-    if (h264DecoderRef.current) {
-      h264DecoderRef.current.setRotation(angle);
-    }
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.style.transform = `rotate(${angle}deg)`;
-    }
-  }, [remoteVideoRef]);
 
   const joinRoom = (roomId: string, roomToken: string, supportsWebM?: boolean, sharedSecret: CryptoKey | null = null) => {
     if (supportsWebM !== undefined) {
@@ -989,6 +956,9 @@ export function useSecureRelayCall(
     connectionState,
     setVideoQuality,
     applyRotation,
+    setRemoteMirror,
+    setRemoteFlip,
+    forceKeyframe,
     stats,
     secureEmojis,
     joinRoom,

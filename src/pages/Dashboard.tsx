@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh } from 'lucide-react';
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh, RotateCw, FlipHorizontal, FlipVertical, RefreshCw } from 'lucide-react';
 import { useSecureRelayCall } from '../hooks/useSecureRelayCall';
 import { generateECDHKeyPair, exportPublicKey, importPublicKey, deriveAESKey } from '../utils/cryptoUtils';
 
@@ -211,9 +211,15 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted);
+  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation: applyRemoteRotation, setRemoteMirror, setRemoteFlip, forceKeyframe, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
+  
+  // Manual Video Controls (Attempt 8)
+  const [remoteRotation, setRemoteRotation] = useState(0);
+  const [remoteMirror, setRemoteMirrorState] = useState(false);
+  const [remoteFlip, setRemoteFlipState] = useState(false);
+  const [localMirror, setLocalMirror] = useState(true);
 
   // Auto-recovery for frozen video
   useEffect(() => {
@@ -446,10 +452,7 @@ export default function Dashboard() {
       }
     });
 
-    newSocket.on('rotation', ({ angle }) => {
-      addLog(`🔄 Received rotation via socket: ${angle}`);
-      applyRotation(angle);
-    });
+    // Attempt 8: Removed automatic orientation sync
 
     newSocket.on('call_delivered', () => {
       addLog('ℹ️ Call delivered to remote');
@@ -1297,6 +1300,61 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+
+            {/* Manual Controls (Rotate, Mirror, Flip, Force Keyframe) */}
+            <button 
+              onClick={() => {
+                const next = (remoteRotation + 90) % 360;
+                setRemoteRotation(next);
+                applyRemoteRotation(next);
+              }}
+              className="w-12 h-12 md:w-14 md:h-14 bg-zinc-800 hover:bg-zinc-700 rounded-full flex items-center justify-center text-white transition-colors"
+              title="Повернуть на 90°"
+            >
+              <RotateCw size={24} />
+            </button>
+
+            <button 
+              onClick={() => {
+                const next = !remoteMirror;
+                setRemoteMirrorState(next);
+                setRemoteMirror(next);
+              }}
+              className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white transition-colors ${remoteMirror ? 'bg-zinc-700 text-emerald-400' : 'bg-zinc-800 hover:bg-zinc-700'}`}
+              title="Отразить зеркально"
+            >
+              <FlipHorizontal size={24} />
+            </button>
+
+            <button 
+              onClick={() => {
+                const next = !remoteFlip;
+                setRemoteFlipState(next);
+                setRemoteFlip(next);
+              }}
+              className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white transition-colors ${remoteFlip ? 'bg-zinc-700 text-emerald-400' : 'bg-zinc-800 hover:bg-zinc-700'}`}
+              title="Перевернуть вверх ногами"
+            >
+              <FlipVertical size={24} />
+            </button>
+
+            <button 
+              onClick={() => {
+                setLocalMirror(!localMirror);
+              }}
+              className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center text-white transition-colors ${localMirror ? 'bg-zinc-700 text-emerald-400' : 'bg-zinc-800 hover:bg-zinc-700'}`}
+              title="Зеркало предпросмотра"
+            >
+              <SwitchCamera size={24} className={localMirror ? 'scale-x-[-1]' : ''} />
+            </button>
+
+            <button 
+              onClick={forceKeyframe}
+              className="w-12 h-12 md:w-14 md:h-14 bg-amber-500/10 hover:bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500 transition-colors border border-amber-500/20"
+              title="Принудительный ключевой кадр"
+            >
+              <RefreshCw size={24} />
+            </button>
 
             <button 
               onClick={endCall}
