@@ -176,7 +176,9 @@ async function handleUserLogin(authData: any, inviteCode: string, res: any) {
   // Generate JWT
   const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
   
-  res.json({ token, user });
+  // Omit password hash for safety
+  const { password_hash: _, ...safeUser } = user;
+  res.json({ token, user: safeUser });
 }
 
 router.post('/login', async (req, res) => {
@@ -197,7 +199,8 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user });
+    const { password_hash: _, ...safeUser } = user;
+    res.json({ token, user: safeUser });
   } catch (error) {
     console.error('Error in /login:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -245,7 +248,8 @@ router.post('/register', async (req, res) => {
     */
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user });
+    const { password_hash: _, ...safeUser } = user;
+    res.json({ token, user: safeUser });
   } catch (error) {
     console.error('Error in /register:', error);
     res.status(500).json({ error: 'Internal server error' });

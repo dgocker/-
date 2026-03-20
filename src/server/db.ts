@@ -80,10 +80,11 @@ class PostgresDB {
 
   // Mock prepare to ease migration, but it will return async functions
   prepare(sql: string) {
+    const self = this;
     return {
-      get: async (...params: any[]) => this.get(sql, ...params),
-      all: async (...params: any[]) => this.all(sql, ...params),
-      run: async (...params: any[]) => this.run(sql, ...params)
+      get: (...params: any[]) => self.get(sql, ...params),
+      all: (...params: any[]) => self.all(sql, ...params),
+      run: (...params: any[]) => self.run(sql, ...params)
     };
   }
 }
@@ -104,15 +105,25 @@ class SqliteDB {
   }
 
   async run(sql: string, ...params: any[]) {
-    return this.db.prepare(sql).run(...params);
+    const result = this.db.prepare(sql).run(...params);
+    return {
+      lastInsertRowid: Number(result.lastInsertRowid),
+      changes: result.changes
+    };
   }
 
   prepare(sql: string) {
     const stmt = this.db.prepare(sql);
     return {
-      get: (...params: any[]) => stmt.get(...params),
-      all: (...params: any[]) => stmt.all(...params),
-      run: (...params: any[]) => stmt.run(...params)
+      get: (...params: any[]) => Promise.resolve(stmt.get(...params)),
+      all: (...params: any[]) => Promise.resolve(stmt.all(...params)),
+      run: (...params: any[]) => {
+        const result = stmt.run(...params);
+        return Promise.resolve({
+          lastInsertRowid: Number(result.lastInsertRowid),
+          changes: result.changes
+        });
+      }
     };
   }
 }

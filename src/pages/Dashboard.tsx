@@ -1009,13 +1009,14 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-4">
-          {friends.length === 0 ? (
+          {(!friends || friends.length === 0) ? (
             <div className="text-center py-12 bg-zinc-900/50 rounded-2xl border border-zinc-800/50">
               <p className="text-zinc-400">У вас пока нет добавленных друзей.</p>
               <p className="text-sm text-zinc-500 mt-2">Сгенерируйте ссылку и отправьте её другу!</p>
             </div>
           ) : (
             friends.map(friend => {
+              if (!friend) return null;
               const isOnline = onlineFriends.includes(friend.id);
               return (
                 <motion.div 
@@ -1026,8 +1027,8 @@ export default function Dashboard() {
                 >
                     <div className="flex items-center gap-4">
                       <div className="relative">
-                        {friend.photo_url ? (
-                          <img src={friend.photo_url} alt={friend.first_name} className="w-10 h-10 rounded-full" />
+                        {friend?.photo_url ? (
+                          <img src={friend.photo_url} alt={friend.first_name || 'Friend'} className="w-10 h-10 rounded-full" />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center">
                             <span className="text-lg font-medium">{friend.first_name?.[0]}</span>
@@ -1036,8 +1037,8 @@ export default function Dashboard() {
                         <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-zinc-900 ${isOnline ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
                       </div>
                       <div>
-                        <p className="font-medium">{friend.first_name} {friend.last_name}</p>
-                        <p className="text-xs text-zinc-400">@{friend.username}</p>
+                        <p className="font-medium">{friend?.first_name} {friend?.last_name}</p>
+                        <p className="text-xs text-zinc-400">{friend?.username ? `@${friend.username}` : ''}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
