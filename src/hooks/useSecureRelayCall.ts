@@ -19,7 +19,16 @@ export function useSecureRelayCall(
 ) {
   const [connectionState, setConnectionState] = useState<'disconnected' | 'checking' | 'connected'>('disconnected');
   const [stats, setStats] = useState({ rtt: 0, packetLoss: 0, bitrate: 0, resolution: '', fps: 0, quality: 0, scale: 0, droppedFrames: 0, netState: 'Normal' });
+  const [remoteRotation, setRemoteRotation] = useState<number>(0);
+  const [remoteMirror, setRemoteMirror] = useState<boolean>(false);
+  const [remoteFlipV, setRemoteFlipV] = useState<boolean>(false);
   const [metricHistory, setMetricHistory] = useState<{ts: number, rtt: number, fps: number, bitrate: number, state: string}[]>([]);
+  
+  // Phase 3.2: Decryption Worker
+  const decryptWorkerRef = useRef<Worker | null>(null);
+  const pendingDecryptOpsRef = useRef(new Map<number, { resolve: (data: Uint8Array) => void; reject: (err: Error) => void }>());
+  const decryptOpIdRef = useRef(0);
+  const decryptWorkerReadyRef = useRef<boolean>(false);
   const rttRef = useRef<number>(0);
   const [isFallbackMode, setIsFallbackMode] = useState<boolean>(false);
   const remoteCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -139,16 +148,47 @@ export function useSecureRelayCall(
       }
     };
 
-    window.addEventListener('orientationchange', handler);
-    // Also listen to screen orientation change for modern browsers (Android)
-    if (screen.orientation) {
-      screen.orientation.addEventListener('change', handler);
-    }
-    
     if (connectionState === 'connected') handler();
+
+    // Phase 3.2: Initialize Decryption Worker
+    if (!decryptWorkerRef.current && typeof Worker !== 'undefined') {
+       const worker = new Worker(new URL('../workers/cryptoWorker.ts', import.meta.url), { type: 'module' });
+       decryptWorkerRef.current = worker;
+        worker.onmessage = (e) => {
+          const { type, id, data, error } = e.data;
+          
+          if (type === 'KEY_READY') {
+            decryptWorkerReadyRef.current = true;
+            return;
+          }
+          if (type === 'KEY_CLEARED') {
+            decryptWorkerReadyRef.current = false;
+            return;
+          }
+          
+          const pending = pendingDecryptOpsRef.current.get(id);
+          if (pending) {
+            pendingDecryptOpsRef.current.delete(id);
+            if (type === 'ERROR') pending.reject(new Error(error));
+            else pending.resolve(new Uint8Array(data));
+          }
+        };
+     }
+
+    // Phase 2.2: Reconnect on visibility change
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !isCleanedUpRef.current && currentRoomIdRef.current) {
+        if (wsRef.current?.readyState === WebSocket.CLOSED || wsRef.current?.readyState === WebSocket.CLOSING) {
+          addLog('☀️ Visibility restored: Forcing relay reconnection');
+          connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current!, sharedSecretRef.current);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('orientationchange', handler);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (screen.orientation) {
         screen.orientation.removeEventListener('change', handler);
       }
@@ -165,6 +205,8 @@ export function useSecureRelayCall(
     }
 
     // Task 329: Stop engine and clear crypto key
+    rttRef.current = 0;
+    // mySidRef.current = 0; // This line was causing a type error, mySidRef is string
     if (adaptiveEngineRef.current) {
       adaptiveEngineRef.current.stop();
     }
@@ -241,6 +283,14 @@ export function useSecureRelayCall(
       }
       remoteVideoRef.current.src = '';
     }
+    
+    // 🔥 Fix: Terminate worker to prevent multi-call state leakage
+    if (decryptWorkerRef.current) {
+      decryptWorkerRef.current.postMessage({ type: 'CLEAR_KEY' });
+      decryptWorkerRef.current.terminate();
+      decryptWorkerRef.current = null;
+      decryptWorkerReadyRef.current = false;
+    }
   }, [remoteVideoRef, addLog]);
 
 
@@ -275,7 +325,7 @@ export function useSecureRelayCall(
     const originalSize = paddedView.getUint32(1, true);
     const senderTs = paddedView.getUint32(5, true); // Task 17
     return { 
-      data: paddedBuffer.slice(9, 9 + originalSize),
+      data: new Uint8Array(paddedBuffer, 9, originalSize),
       type,
       senderTs
     };
@@ -304,7 +354,7 @@ export function useSecureRelayCall(
   // PCM Audio Receiver
   const receiverAudioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const SAMPLE_RATE = 8000; // Reduced from 16000 to save bandwidth (128kbps instead of 256kbps)
+  const SAMPLE_RATE = 16000; // Phase 4: Increased from 8000 for better quality
 
   const initAudioContexts = () => {
     if (isCleanedUpRef.current) return;
@@ -331,42 +381,83 @@ export function useSecureRelayCall(
     }
   };
 
-  const playAudioChunk = (chunk: ArrayBuffer | Uint8Array, senderTs: number = 0) => {
-    if (!receiverAudioContextRef.current) {
-      receiverAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+  const decryptInWorker = async (data: Uint8Array, iv: Uint8Array): Promise<Uint8Array> => {
+    // FIX BUG: Wait for initialization if it's pending
+    if (decryptWorkerRef.current && !decryptWorkerReadyRef.current) {
+        // Poll briefly: usually KEY_READY happens in <10ms
+        let waitCount = 0;
+        while (!decryptWorkerReadyRef.current && waitCount < 50) {
+            await new Promise(r => setTimeout(r, 10));
+            waitCount++;
+        }
     }
 
-    // Task 17: Use Jitter Buffer for A/V Sync
+    return new Promise((resolve, reject) => {
+      // Fallback to main thread if worker not ready or failed
+      if (!decryptWorkerRef.current || !sharedSecretRef.current || !decryptWorkerReadyRef.current) {
+        if (sharedSecretRef.current) {
+          decryptData(sharedSecretRef.current, data).then(resolve).catch(reject);
+        } else {
+          reject(new Error('No shared secret or worker not ready'));
+        }
+        return;
+      }
+      
+      const id = ++decryptOpIdRef.current;
+      pendingDecryptOpsRef.current.set(id, { resolve, reject });
+      
+      const payload = data.buffer;
+      const ivBuffer = iv.buffer;
+      decryptWorkerRef.current.postMessage({
+        type: 'DECRYPT_VIDEO',
+        payload: payload,
+        iv: ivBuffer,
+        id
+      }, [payload, ivBuffer]);
+    });
+  };
+
+  const playAudioChunk = (chunk: ArrayBuffer | Uint8Array, senderTs: number = 0) => {
+    if (!receiverAudioContextRef.current) {
+      initAudioContexts();
+    }
+    
+    // === Phase 4: A/V Sync Jitter Buffer ===
     audioJitterBufferRef.current.push({ data: chunk, senderTs });
-    if (audioJitterBufferRef.current.length > 150) audioJitterBufferRef.current.shift(); // Relaxed safety cap
+    if (audioJitterBufferRef.current.length > 150) audioJitterBufferRef.current.shift();
 
     if (!(receiverAudioContextRef.current as any)._isLoopStarted) {
       (receiverAudioContextRef.current as any)._isLoopStarted = true;
+      let nextPlayTime = 0;
+      
       const playLoop = () => {
         if (isCleanedUpRef.current) return;
         
-        if (audioJitterBufferRef.current.length > 0 && h264DecoderRef.current) {
+        const ctx = receiverAudioContextRef.current!;
+        if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
-          const stats = h264DecoderRef.current.getStats();
-          if (stats.firstPlayoutTime > 0) {
+          const stats = h264DecoderRef.current?.getStats();
+          
+          // Sync logic: only if video is active and synced
+          if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
             const targetPlayTime = stats.firstPlayoutTime + videoOffset + stats.targetDelay;
             const now = performance.now();
 
-            if (now < targetPlayTime) {
+            // If we are too early, wait a bit
+            if (now < targetPlayTime - 10) {
               setTimeout(playLoop, 10);
               return;
             }
             
-            // Catch-up: if audio is too old (>500ms), drop it
-            if (now - targetPlayTime > (h264DecoderRef.current?.getStats()?.dropThreshold || 500)) {
+            // Catch-up: if audio is too old (>800ms), drop it
+            if (now - targetPlayTime > 800) {
                audioJitterBufferRef.current.shift();
                setTimeout(playLoop, 5);
                return;
             }
           }
 
-          const ctx = receiverAudioContextRef.current!;
           if (ctx.state === 'suspended') ctx.resume();
 
           const audioBuffer = ctx.createBuffer(1, packet.data.byteLength, SAMPLE_RATE);
@@ -379,11 +470,21 @@ export function useSecureRelayCall(
           source.buffer = audioBuffer;
           source.connect(ctx.destination);
 
-          // We use the AudioContext's currentTime for precise scheduling if possible, 
-          // but since we already waited for targetPlayTime in JS domain, playing immediately is fine.
-          source.start(0);
+          // Precise scheduling using AudioContext.currentTime
+          const currentTime = ctx.currentTime;
+          if (nextPlayTime < currentTime) {
+            nextPlayTime = currentTime + 0.04; // 40ms safety buffer
+          }
+          
+          source.start(nextPlayTime);
+          nextPlayTime += audioBuffer.duration;
           
           audioJitterBufferRef.current.shift();
+          
+          // If we have a large buffer, play next chunk sooner
+          const delay = audioJitterBufferRef.current.length > 10 ? 5 : 15;
+          setTimeout(playLoop, delay);
+          return;
         }
         setTimeout(playLoop, 20);
       };
@@ -488,9 +589,24 @@ export function useSecureRelayCall(
     if (activeStreamRef.current) {
       startPCMAudioSender(activeStreamRef.current);
       
-      // In Secure Relay mode, we force our custom H.264 engine over standard WebM
-      // because it provides much better latency control (catch-up logic) and 
-      // is specifically tuned for 150-300kbps "survival" scenarios.
+      if (!h264DecoderRef.current && remoteCanvasRef.current) {
+        const requestKeyframe = () => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
+            addLog('📤 Requested keyframe from remote');
+          }
+        };
+        h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
+          enableDynamicJitter: true
+        });
+        h264DecoderRef.current.setRotation(remoteRotation);
+        h264DecoderRef.current.setMirror(remoteMirror);
+        h264DecoderRef.current.setFlipV(remoteFlipV);
+        if (receiverAudioContextRef.current) {
+          h264DecoderRef.current.setAudioContext(receiverAudioContextRef.current);
+        }
+      }
+
       addLog('🚀 Using H.264 + PCM Audio (Forced for all devices)');
       startFallbackRecording();
     } else {
@@ -542,8 +658,13 @@ export function useSecureRelayCall(
         },
         wsRef.current!,
         addLog,
-        sharedSecretRef.current  // \u2190 Pass E2EE key so video frames are encrypted
+        sharedSecretRef.current,
+        {
+          enableSafeTailDrop: true,
+          enableScalablePacing: true
+        }
       );
+      addLog('🛠️ Video Optimizations Enabled: Tail-Drop, Scalable Pacing, Dynamic Jitter (tanh)');
     }
     
     // === FINAL iPhone + Android rotation fix ===
@@ -610,10 +731,14 @@ export function useSecureRelayCall(
   };
 
   const connectToRelay = (roomId: string, roomToken: string, sharedSecret: CryptoKey | null, retryCount: number = 0) => {
+    if (sharedSecret && decryptWorkerRef.current) {
+        crypto.subtle.exportKey('raw', sharedSecret).then(raw => {
+          decryptWorkerRef.current?.postMessage({ type: 'INIT_KEY', keyData: raw }, [raw]);
+        }).catch(err => addLog(`❌ Failed to export secret for worker: ${err}`));
+    }
     isCleanedUpRef.current = false;
     currentRoomIdRef.current = roomId;
     currentRoomTokenRef.current = roomToken;
-    sharedSecretRef.current = null; // Task 15: Reset before setting new one
     sharedSecretRef.current = sharedSecret;
 
     generateEmojis(roomId);
@@ -678,8 +803,25 @@ export function useSecureRelayCall(
     ws.onerror = (e) => {
       console.error('WebSocket error:', e);
       addLog(`❌ WebSocket error (State: ${ws.readyState}, Buffered: ${ws.bufferedAmount})`);
-      // Fallback: if we are stuck in 'checking', set to 'disconnected' to allow manual retry or auto-retry in onclose
       if (connectionState === 'checking') setConnectionState('disconnected');
+    };
+
+    ws.onclose = (event) => {
+      if (wsRef.current === ws) wsRef.current = null;
+      setConnectionState('disconnected');
+      
+      const isAbnormal = event.code === 1006 || event.code === 1001;
+      addLog(`🔌 WebSocket closed: ${event.code} (Abnormal=${isAbnormal})`);
+
+      if (!isCleanedUpRef.current && isAbnormal && retryCount < 10) {
+        const delay = Math.min(30000, Math.pow(2, retryCount) * 1000 + (Math.random() * 1000));
+        addLog(`🔄 Reconnecting in ${Math.round(delay)}ms (attempt ${retryCount + 1})...`);
+        setTimeout(() => {
+          if (!isCleanedUpRef.current && currentRoomIdRef.current) {
+            connectToRelay(currentRoomIdRef.current, currentRoomTokenRef.current!, sharedSecretRef.current, retryCount + 1);
+          }
+        }, delay);
+      }
     };
 
     const isFallbackMode = !remoteSupportsWebMRef.current || !mySupportsWebMRef.current;
@@ -796,12 +938,19 @@ export function useSecureRelayCall(
             return;
           }
           if (msg.type === 'rotation') {
+            setRemoteRotation(msg.value || 0);
+            setRemoteMirror(!!msg.mirror);
             if (h264DecoderRef.current) {
               h264DecoderRef.current.setRotation(msg.value);
             }
             if (remoteVideoRef.current) {
               remoteVideoRef.current.style.transform = `rotate(${msg.value}deg)`;
             }
+            return;
+          }
+          if (msg.type === 'request_keyframe') {
+            addLog('📥 Remote requested keyframe');
+            adaptiveEngineRef.current?.forceKeyframe();
             return;
           }
         } catch (e) {}
@@ -814,7 +963,9 @@ export function useSecureRelayCall(
             const paddingInfo = removePadding(event.data);
             let audioData: ArrayBuffer | Uint8Array = paddingInfo.data;
             if (part[0] === 3 && sharedSecretRef.current) {
-              audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
+              const iv = new Uint8Array(audioData.slice(0, 12));
+              const ciphertext = new Uint8Array(audioData.slice(12));
+              audioData = await decryptInWorker(ciphertext, iv);
             }
             playAudioChunk(audioData, paddingInfo.senderTs);
           } catch (e) {}
@@ -840,7 +991,9 @@ export function useSecureRelayCall(
               let { data: clean, senderTs } = await deobfuscateAssemble(chunksToProcess);
               if (sharedSecretRef.current) {
                 try {
-                  clean = await decryptData(sharedSecretRef.current, clean);
+                  const iv = clean.subarray(0, 12);
+                  const ciphertext = clean.subarray(12);
+                  clean = await decryptInWorker(ciphertext, iv);
                 } catch (e) { return; }
               }
               
@@ -850,7 +1003,17 @@ export function useSecureRelayCall(
               }
               
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
+                const requestKeyframe = () => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
+                  }
+                };
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
+                  enableDynamicJitter: true
+                });
+                h264DecoderRef.current.setRotation(remoteRotation);
+                h264DecoderRef.current.setMirror(remoteMirror);
+                h264DecoderRef.current.setFlipV(remoteFlipV);
               }
               if (h264DecoderRef.current) {
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
@@ -858,7 +1021,6 @@ export function useSecureRelayCall(
                 h264DecoderRef.current.pushPacket(clean, frameId, currentFps, senderTs);
               }
 
-              setIsFallbackMode(true);
 
             } catch (e) {}
           }
@@ -873,7 +1035,9 @@ export function useSecureRelayCall(
             const { data, senderTs } = removePadding(arrayBuffer);
             let audioData: ArrayBuffer | Uint8Array = data;
             if (part[0] === 3 && sharedSecretRef.current) {
-              audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
+              const iv = new Uint8Array(audioData.slice(0, 12));
+              const ciphertext = new Uint8Array(audioData.slice(12));
+              audioData = await decryptInWorker(ciphertext, iv);
             }
             playAudioChunk(audioData, senderTs);
           } catch (e) {}
@@ -899,7 +1063,9 @@ export function useSecureRelayCall(
               let { data: clean, senderTs } = await deobfuscateAssemble(chunksToProcess);
               if (sharedSecretRef.current) {
                 try {
-                  clean = await decryptData(sharedSecretRef.current, clean);
+                  const iv = clean.subarray(0, 12);
+                  const ciphertext = clean.subarray(12);
+                  clean = await decryptInWorker(ciphertext, iv);
                 } catch (e) { return; }
               }
               if (!firstJpegReceivedRef.current) {
@@ -907,7 +1073,17 @@ export function useSecureRelayCall(
                 firstJpegReceivedRef.current = true;
               }
               if (!h264DecoderRef.current && remoteCanvasRef.current) {
-                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog);
+                const requestKeyframe = () => {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'request_keyframe', sid: mySidRef.current }));
+                  }
+                };
+                h264DecoderRef.current = new H264Decoder(remoteCanvasRef.current, addLog, requestKeyframe, {
+                  enableDynamicJitter: true
+                });
+                h264DecoderRef.current.setRotation(remoteRotation);
+                h264DecoderRef.current.setMirror(remoteMirror);
+                h264DecoderRef.current.setFlipV(remoteFlipV);
               }
               if (h264DecoderRef.current) {
                 const currentFps = adaptiveEngineRef.current?.getStats()?.fps || 24;
@@ -969,10 +1145,7 @@ export function useSecureRelayCall(
     if (h264DecoderRef.current) {
       h264DecoderRef.current.setRotation(angle);
     }
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.style.transform = `rotate(${angle}deg)`;
-    }
-  }, [remoteVideoRef]);
+  }, []);
 
   const joinRoom = (roomId: string, roomToken: string, supportsWebM?: boolean, sharedSecret: CryptoKey | null = null) => {
     if (supportsWebM !== undefined) {
@@ -997,6 +1170,8 @@ export function useSecureRelayCall(
     isFallbackMode,
     remoteCanvasRef,
     metricHistory,
+    remoteRotation,
+    remoteMirror,
     resumeAudio: async () => {
       addLog('🎙️ resumeAudio called');
       if (isCleanedUpRef.current) {

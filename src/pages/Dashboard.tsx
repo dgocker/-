@@ -61,20 +61,27 @@ export default function Dashboard() {
 
   const exportLogs = async () => {
     try {
-      addLog('📤 Starting log export...');
+      showToast('⏳ Подготовка логов...');
+      addLog('📤 Starting log export optimization...');
       
-      let metricsSection = "\n\n=== CALL METRICS HISTORY ===\n";
-      if (metricHistory.length > 0) {
-        metricsSection += "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
-        metricHistory.forEach(m => {
-          const time = new Date(m.ts).toLocaleTimeString();
-          metricsSection += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
-        });
-      } else {
-        metricsSection += "No metrics available (call not started or too short).\n";
-      }
+      // Use setTimeout to allow Toast to render before heavy processing
+      await new Promise(resolve => setTimeout(resolve, 0));
 
-      const fullLogs = logs.join('\n') + metricsSection;
+      const metricsRows = metricHistory.map(m => {
+        const time = new Date(m.ts).toLocaleTimeString();
+        return `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}`;
+      });
+
+      const metricsHeader = "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
+      const metricsSection = "\n\n=== CALL METRICS HISTORY ===\n" + 
+        (metricsRows.length > 0 ? metricsHeader + metricsRows.join('\n') : "No metrics available.\n");
+
+      // Truncate logs if they are extremely large to prevent network failure (max ~1MB)
+      const truncatedLogs = logs.length > 2000 ? logs.slice(-2000) : logs;
+      const fullLogs = truncatedLogs.join('\n') + metricsSection;
+
+      addLog(`📊 Exporting: ${Math.round(fullLogs.length / 1024)}KB of data`);
+      showToast('📤 Отправка на сервер...');
 
       const response = await fetch('/api/support/logs', {
         method: 'POST',
@@ -85,12 +92,27 @@ export default function Dashboard() {
         body: JSON.stringify({ logs: fullLogs })
       });
       
-      const data = await response.json();
       if (response.ok) {
-        showToast('✅ Логи успешно отправлены администратору');
+        showToast('✅ Логи успешно отправлены');
         addLog('✅ Logs exported successfully');
       } else {
-        throw new Error(data.error || 'Failed to export logs');
+        const contentType = response.headers.get('content-type');
+        let errorMessage = `Server error ${response.status}`;
+        
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+        } else {
+          const text = await response.text();
+          if (text.includes('Payload Too Large')) {
+            errorMessage = 'Logs are too large for the server. Try again with fewer logs.';
+          } else if (response.status === 500) {
+            errorMessage = 'Server internal error. Check server logs.';
+          } else {
+            errorMessage = text.slice(0, 100) || errorMessage;
+          }
+        }
+        throw new Error(errorMessage);
       }
     } catch (e: any) {
       showToast(`❌ Ошибка экспорта: ${e.message}`);
@@ -211,7 +233,7 @@ export default function Dashboard() {
   };
 
   const [autoplayFailed, setAutoplayFailed] = useState(false);
-  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted);
+  const { initiateCall, initAudioContexts, cleanup, peerConnection, connectionState, setVideoQuality, applyRotation, stats, secureEmojis, joinRoom, startRecording, setRemoteSupportsWebM, resumeAudio, isFallbackMode, remoteCanvasRef, metricHistory, remoteRotation, remoteMirror } = useSecureRelayCall(socket, activeStreamRef, setRemoteStream, handleCallEnded, remoteVideoRef, setAutoplayFailed, addLog, isAudioMuted);
   const [currentQuality, setCurrentQuality] = useState<'auto' | 'high' | 'medium' | 'low' | 'verylow'>('auto');
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
@@ -1129,6 +1151,9 @@ export default function Dashboard() {
               <canvas 
                 ref={remoteCanvasRef} 
                 className={`absolute inset-0 w-full h-full object-contain transition-all duration-300 ${isFallbackMode ? 'block' : 'hidden'}`}
+                style={{
+                  transformOrigin: 'center center'
+                }}
               />
               {autoplayFailed && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-30 p-6 text-center">
