@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    /* Safe area for Telegram Web App header and mobile notches */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    /* Prevent overscroll on mobile */
+    overscroll-behavior: none;
+  }
+}
