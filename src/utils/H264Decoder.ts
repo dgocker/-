@@ -28,7 +28,7 @@ export class H264Decoder {
 
   // Adaptive Jitter Buffer (Task 18 & Jitter Fix)
   private readonly MAX_DELAY = 2000;
-  private readonly MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 80;
+  private readonly MIN_DELAY = /Android/i.test(navigator.userAgent) ? 250 : 150;
   private readonly CATCH_UP_THRESHOLD = 600;
 
   private firstSenderTs = -1;
@@ -159,7 +159,7 @@ export class H264Decoder {
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
 
-    if (!this.isPlaying && this.jitterBuffer.length >= 1) {
+    if (!this.isPlaying && this.jitterBuffer.length >= 3) {
       this.isPlaying = true;
       
       // ✅ КРИТИЧЕСКИ ВАЖНО: Восстановление после микро-разрывов (gap > 3s)

@@ -119,8 +119,8 @@ export class AdaptiveH264Engine {
 
   private targetBitrate: number = 500_000;
   private lastConfiguredBitrate: number = 0;
-  private minBitrate: number = 200_000; // Было 100_000
-  private maxBitrate: number = 4_000_000;
+  private minBitrate: number = 150_000;   // Чуть ниже для полей (Edge/3G)
+  private maxBitrate: number = 2_500_000; // Было 4_000_000
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
   private lastEncodeTs: number = performance.now(); // Watchdog tracking
@@ -315,28 +315,50 @@ export class AdaptiveH264Engine {
   private applyBitrateToParams() {
     if (!this.encoder || !this.isConfigured) return;
 
+    const kbps = this.targetBitrate / 1024;
+    
+    // Математика распределения:
+    // < 300 kbps: 10 FPS (экономия для голоса и базовых движений)
+    // < 800 kbps: 15 FPS (плавно для вебки, экономит 50% битрейта)
+    // < 1500 kbps: 24 FPS (кинематографичный стандарт)
+    // > 1500 kbps: 30 FPS
+    
+    if (kbps < 300) this.currentFps = 10;
+    else if (kbps < 800) this.currentFps = 15;
+    else if (kbps < 1500) this.currentFps = 24;
+    else this.currentFps = 30;
+
+    // Динамическое разрешение на основе битрейта (Telegram way)
+    if (kbps < 400) {
+      this.currentScale = 0.3; // Уход в ~240p
+    } else if (kbps < 800) {
+      this.currentScale = 0.5; // Уход в ~360p
+    } else if (kbps < 1500) {
+      this.currentScale = 0.75; // Уход в ~480p/540p
+    } else {
+      // Если RTT хороший, возвращаем 720p
+      this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0; 
+    }
+
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
     if (diffRatio >= 0.05) {
       try {
         this.encoder.configure({
-          codec: "avc1.42e01f", // Baseline Profile
+          codec: "avc1.42e01f",
           width: this.currentWidth,
           height: this.currentHeight,
           bitrate: this.targetBitrate,
           bitrateMode: 'variable',
           latencyMode: "realtime",
+          // Уменьшаем GOP (key_frame_interval) для сетей с потерями.
+          // Если FPS падает до 15, I-Frame каждые 60 кадров = каждые 4 секунды (слишком долго для восстановления)
+          // Ставим I-frame каждые 2 секунды:
           // @ts-ignore
-          avc: { format: "annexb", key_frame_interval: 60 }
+          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 } 
         });
         this.lastConfiguredBitrate = this.targetBitrate;
       } catch (e) { }
     }
-
-    const kbps = this.targetBitrate / 1024;
-    if (kbps < 300) this.currentFps = 10;
-    else if (kbps < 600) this.currentFps = 15;
-    else if (kbps < 1200) this.currentFps = 24;
-    else this.currentFps = 30;
   }
 
   private updateCongestionControl() {
@@ -370,8 +392,8 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 100000;
-    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || isBufferGrowing || queueDelay > 600; 
-    
+    // Снижаем порог чувствительности к задержке очереди
+    const isOveruse = this.delayTrend > this.OVERUSE_THRESHOLD || isBufferGrowing || queueDelay > 400; // Было 600    
     if (isOveruse) {
       if (this.aiState !== 'congested') {
          this.aiState = 'congested';
@@ -393,8 +415,9 @@ export class AdaptiveH264Engine {
         }
       } else if (this.aiState === 'steady') {
         if (now - this.lastSteadyIncrease > 300) { 
-          const growthFactor = this.lastSmoothedRtt < 150 ? 1.10 : 1.05; 
-          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * growthFactor + 10000);
+          // Более плавный рост
+          const growthFactor = this.lastSmoothedRtt < 150 ? 1.05 : 1.02; // Было 1.10 / 1.05
+          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate * growthFactor + 5000);
           this.lastSteadyIncrease = now;
         }
 
@@ -405,7 +428,9 @@ export class AdaptiveH264Engine {
 
         if (this.isProbing) {
           if (now - this.probingStartTs < 250) {
-            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 2.0); 
+            // МАТЕМАТИКА: Прощупываем сеть ростом на +15%, а не умножением на 2!
+            // Умножение на 2 убивало 1Мбит каналы мгновенно.
+            this.targetBitrate = Math.min(this.maxBitrate, oldBitrate * 1.15); 
           } else {
             this.isProbing = false;
             this.probingStartTs = now; 
@@ -619,16 +644,8 @@ export class AdaptiveH264Engine {
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
       const isInternalQueuePanic = this.sendQueue.length > 80 || queueBytes > 2048000;
 
-      // ИСПРАВЛЕНИЕ: Resolution scaling based on RTT
-      if (this.lastSmoothedRtt > 1500) {
-        this.currentScale = 0.3;
-      } else if (this.lastSmoothedRtt > 800) {
-        this.currentScale = 0.5;
-      } else if (this.lastSmoothedRtt > 400) {
-        this.currentScale = 0.75;
-      } else {
-        this.currentScale = 1.0;
-      }
+      // Resolution scaling based on bitrate is now handled in applyBitrateToParams
+
 
       const maxWsBuffer = Math.max(800000, (this.targetBitrate / 8) * 1.5);
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
@@ -689,12 +706,20 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(5000, bytesPerMs * 100); 
-    const multiplier = this.sendQueue.length > 10 ? 1.8 : 1.1; // ВОЗВРАЩАЕМ ПЛАВНОСТЬ
+    
+    // Снижаем максимальный Burst (залп) до 30-40 мс (что примерно равно 1 кадру при 24 fps).
+    // Это сделает отправку по сети максимально "ровной" струйкой.
+    const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
+    
+    // Убираем множитель 1.8, если очередь большая. Он заставлял Pacer паниковать 
+    // и заливать сеть трафиком именно тогда, когда сеть УЖЕ тормозила.
+    const multiplier = this.sendQueue.length > 10 ? 1.2 : 1.0; 
+    
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
-    const MAX_BYTES_PER_TICK = 131072;
+    // Снижаем лимит на один цикл таймера (разгружаем Event Loop и сокет)
+    const MAX_BYTES_PER_TICK = 32768; // Было 131072. Уменьшаем размер чанка за 1 тик таймера (10мс)
 
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
