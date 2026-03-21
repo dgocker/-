@@ -491,9 +491,9 @@ export class AdaptiveH264Engine {
   public updateRemoteJitter(jitter: number) {
     this.lastRemoteJitter = jitter;
     
-    // Если пакеты начали приходить неравномерно (jitter > 60мс),
+    // Если пакеты начали приходить неравномерно (jitter > 150мс),
     // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
-    if (jitter > 60 && this.aiState !== 'congested') {
+    if (jitter > 150 && this.aiState !== 'congested') {
       if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
       
       this.aiState = 'congested';
@@ -673,13 +673,13 @@ export class AdaptiveH264Engine {
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
       
       // FIX: Умный сброс очереди. Нельзя делать slice массива фрагментов, это ломает H.264 кадр!
-      // Если очередь слишком большая, сбрасываем её полностью и запрашиваем чистый Keyframe.
+      // Если очередь слишком большая, сбрасываем её полностью
       if (this.sendQueue.length > 150) {
-        if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Dropping all and forcing Keyframe!`);
-        this.sendQueue = []; // Очищаем полностью, никаких огрызков
-        if (now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
-          this.needsKeyframe = true; // Заставляем энкодер собрать картинку с нуля
-        }
+        if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
+        this.sendQueue = []; // Очищаем полностью
+        this.pacerTokens = Math.max(0, this.pacerTokens); // Сбрасываем долг пейсера, чтобы сразу слать
+        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5); // Режем качество в 2 раза
+        this.applyBitrateToParams(true);
       }
 
       const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
@@ -752,7 +752,7 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
+    const maxPacerBurst = Math.max(60000, bytesPerMs * 150); // Разрешаем выброс до 60 КБ или 150мс
 
     // Phase 3: Recover multiplier to clear bursts
     const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1; 
@@ -772,9 +772,9 @@ export class AdaptiveH264Engine {
       this.sendQueue.shift();
     }
 
-    // Защита от глубокого минуса токенов (не более 300мс долга)
+    // Защита от глубокого минуса токенов (не более 1.5 секунд долга)
     // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
-    const maxPacerDebt = -(this.targetBitrate / 8) * 0.3; 
+    const maxPacerDebt = -(this.targetBitrate / 8) * 1.5; 
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
     }
