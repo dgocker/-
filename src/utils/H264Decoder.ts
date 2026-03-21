@@ -205,8 +205,13 @@ export class H264Decoder {
     const packet = this.jitterBuffer[0];
     
     // Fast Recovery: Если буфер слишком большой, прыгаем до свежего keyframe
-    const bufferDuration = this.jitterBuffer.length * (1000 / 30);
-    if (bufferDuration > 1000) {
+    const firstPacket = this.jitterBuffer[0];
+    const lastPacket = this.jitterBuffer[this.jitterBuffer.length - 1];
+    const bufferDuration = lastPacket.senderTs - firstPacket.senderTs;
+
+    // Phase 2: Catch-up logic via hard skip. If lag > 400ms, drop everything until the latest keyframe.
+    // This is much better than batch-decoding for CPU and battery.
+    if (bufferDuration > 400 || this.jitterBuffer.length > 30) {
       let latestKeyIdx = -1;
       for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
         if (this.jitterBuffer[i].type === 'key') {
@@ -216,7 +221,7 @@ export class H264Decoder {
       }
       
       if (latestKeyIdx > 0) {
-        if (this.onRequestKeyframe) this.onRequestKeyframe(true);
+        if (this.onLog) this.onLog(`\u23E9 Hard Reset: skipping ${latestKeyIdx} frames, duration=${bufferDuration}ms`);
         this.jitterBuffer.splice(0, latestKeyIdx);
         this.firstSenderTs = -1;
         requestAnimationFrame(this.playNext);
@@ -265,9 +270,9 @@ export class H264Decoder {
       this.firstSenderTs = -1;
     }
 
-    // Если буфер все еще большой, закидываем кадры максимально быстро (ускорение)
-    if (this.jitterBuffer.length > 10) {
-      setTimeout(() => this.playNext(performance.now()), 0);
+    // Если буфер все еще большой, закидываем кадры чуть быстрее (но не блокируем поток)
+    if (this.jitterBuffer.length > 5) {
+      setTimeout(() => this.playNext(performance.now()), 4);
     } else {
       requestAnimationFrame(this.playNext);
     }

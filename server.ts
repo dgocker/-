@@ -99,21 +99,7 @@ async function startServer() {
     const isLoopback = urlParams.get('loopback') === 'true';
 
     ws.on('message', (message, isBinary) => {
-      // FIX: Server-Side RTT (Iteration 9)
-      // If message is a string and contains "type":"ping", respond immediately.
-      // This prevents remote client lag from affecting local bitrate.
-      if (!isBinary) {
-        try {
-          const text = message.toString();
-          if (text.includes('"type":"ping"')) {
-            const msg = JSON.parse(text);
-            ws.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
-            return; // DO NOT relay ping to other clients!
-          }
-        } catch (e) {
-          // Fall through to relay logic for non-json or error cases
-        }
-      }
+      // Server-Side Ping interception removed (Phase 2) to allow end-to-end RTT measurement.
 
       const roomClients = rooms.get(roomId);
       if (roomClients) {
@@ -129,13 +115,22 @@ async function startServer() {
 
         roomClients.forEach((client) => {
           if ((client !== ws || isLoopback) && client.readyState === WebSocket.OPEN) {
-            // FIX: Server-side Backpressure for slow receivers (Download < Upload).
-            // If the receiver's download link is too slow, their buffer will grow indefinitely.
-            // Drop binary (media) packets to keep the queue small and prevent 35,000ms RTT explosions.
-            // Increased to 512KB for Iteration 6 to prevent I-frame truncation.
-            if (isBinary && client.bufferedAmount > 524288) {
-              return; // Drop packet
+            // BACKPRESSURE SIGNAL (Phase 2): Notify sender if receiver's buffer is growing
+            if (isBinary && client.bufferedAmount > 131072) { // 128KB threshold
+              try {
+                ws.send(JSON.stringify({ 
+                  type: 'backpressure', 
+                  rb: client.bufferedAmount,
+                  target: (client as any).id 
+                }));
+              } catch (e) {}
             }
+
+            // Safety drop for extreme congestion
+            if (isBinary && client.bufferedAmount > 524288) { // 512KB limit
+              return;
+            }
+
             try {
               client.send(relayedMessage, { binary: isBinary });
             } catch (e) {

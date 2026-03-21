@@ -762,7 +762,10 @@ export function useSecureRelayCall(
           const msg = JSON.parse(trimmed);
 
           if (msg.type === 'ping') {
-            // Server should handle this now. Just log if needed.
+            // Phase 2: End-to-end RTT. Client responds to ping.
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
+            }
             return;
           }
           if (msg.type === 'pong') {
@@ -788,6 +791,12 @@ export function useSecureRelayCall(
             if (adaptiveEngineRef.current) {
               adaptiveEngineRef.current.forceKeyframe();
               addLog('🚀 Remote requested keyframe, forcing now');
+            }
+            return;
+          }
+          if (msg.type === 'backpressure') {
+            if (adaptiveEngineRef.current) {
+              adaptiveEngineRef.current.triggerBackpressure(msg.rb);
             }
             return;
           }

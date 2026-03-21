@@ -313,7 +313,8 @@ export class AdaptiveH264Engine {
         bitrateMode: 'variable',
         latencyMode: "realtime",
         // @ts-ignore
-        avc: { format: "annexb", key_frame_interval: 60 }
+        // Phase 2: Infinite GOP (3000s) to prevent periodic 1.5MB I-frame spikes blocking the TCP pipe.
+        avc: { format: "annexb", key_frame_interval: 3000 }
       });
       this.currentWidth = width;
       this.currentHeight = height;
@@ -556,7 +557,8 @@ export class AdaptiveH264Engine {
       this.loop().catch(() => {});
     }, 1000 / 30); // Target 30fps baseline
 
-    this.pacerInterval = setInterval(() => this.runPacer(), 10);
+    // Phase 2: Smooth Pacer (5ms ticks @ 16KB/tick) for "thin stream" traffic
+    this.pacerInterval = setInterval(() => this.runPacer(), 5); 
     this.lastAIUpdate = now;
     this.lastTokenUpdate = now;
     this.lastCongestionTs = 0;
@@ -736,21 +738,16 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-
-    // Снижаем максимальный Burst (залп) до 30-40 мс (что примерно равно 1 кадру при 24 fps).
-    // Это сделает отправку по сети максимально "ровной" струйкой.
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
 
-    // FIX: Pacer Acceleration (Task 22). 
-    // OLD: multiplier = this.sendQueue.length > 30 ? 0.9 : 1.0 (PARADOXICAL SLOWDOWN)
-    // NEW: Accelerate to 1.5x to clear queue and minimize RTT!
-    const multiplier = this.sendQueue.length > 20 ? 1.5 : 1.1; 
+    // Phase 2: No acceleration multiplier. If the queue is growing, the Encoder must slow down.
+    const multiplier = 1.0; 
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
-    // Снижаем лимит на один цикл таймера (разгружаем процессор)
-    const MAX_BYTES_PER_TICK = 131072; // ~100 Mbps burst limit (Raised from 16KB)
+    // Phase 2: Smooth flow – 16KB per tick (~25 Mbps burst cap per tick, but overall capped by bitrate)
+    const MAX_BYTES_PER_TICK = 16384; 
     
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
@@ -797,8 +794,8 @@ export class AdaptiveH264Engine {
         this.configureEncoder(targetW, targetH);
       }
 
-      // Task 17: Don't force keyframe if congested (saves bits)
-      if (this.frameId % 90 === 0 && this.aiState !== 'congested') {
+      // Phase 2: Infinite GOP. Only force keyframe on the very first frame or on explicit demand.
+      if (this.frameId === 0) {
         this.needsKeyframe = true;
       }
 
@@ -821,5 +818,13 @@ export class AdaptiveH264Engine {
     } catch (e) {
       return false;
     }
+  }
+
+  public triggerBackpressure(bufferedAmount: number) {
+    if (this.onLog) this.onLog(`🚨 Backpressure received: server buffer=${Math.round(bufferedAmount / 1024)}KB. Slashing bitrate.`);
+    this.aiState = 'congested';
+    this.lastCongestionTs = performance.now();
+    this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.7);
+    this.applyBitrateToParams();
   }
 }
