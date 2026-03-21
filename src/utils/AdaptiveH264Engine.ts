@@ -753,12 +753,8 @@ export class AdaptiveH264Engine {
       this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    // FIX: Enforce Strict Token Bucket. If we have no tokens, skip encoding to naturally drop FPS
-    // Always allow I-frames or at least 1 frame per second to keep connection alive
-    const forceAlive = this.frameId === 0 || this.needsKeyframe || this.frameId % 30 === 0;
-    if (this.tokenBucketBytes <= 0 && !forceAlive) {
-      return false; // rate limiting!
-    }
+    // FIX: Removed strict encoding skip (Task 30). 
+    // It was causing sudden FPS drops. Now we let the Pacer handle it via queue pruning.
 
     if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 6) {
