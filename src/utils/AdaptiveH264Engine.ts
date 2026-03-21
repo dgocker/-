@@ -116,6 +116,7 @@ export class AdaptiveH264Engine {
   private readonly congestionCooldown: number = 1000;
 
   private pacerTokens: number = 0;
+  private lastPacerTick: number = 0;
   private lastPacerRun: number = performance.now();
 
   private targetBitrate: number = 600_000;
@@ -491,9 +492,9 @@ export class AdaptiveH264Engine {
   public updateRemoteJitter(jitter: number) {
     this.lastRemoteJitter = jitter;
 
-    // Если пакеты начали приходить неравномерно (jitter > 300мс),
+    // Если пакеты начали приходить неравномерно (jitter > 600мс),
     // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
-    if (jitter > 300 && this.aiState !== 'congested') {
+    if (jitter > 600 && this.aiState !== 'congested') {
       if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
 
       this.aiState = 'congested';
@@ -677,7 +678,7 @@ export class AdaptiveH264Engine {
 
       // FIX: Умный сброс очереди. Нельзя делать slice массива фрагментов, это ломает H.264 кадр!
       // Если очередь слишком большая, сбрасываем её полностью
-      if (this.sendQueue.length > 150) {
+      if (this.sendQueue.length > 500) {
         if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
 
         this.sendQueue = []; // Очищаем полностью
@@ -751,51 +752,41 @@ export class AdaptiveH264Engine {
 
   private runPacer() {
     const now = performance.now();
-    if (this.sendQueue.length > 0 && this.onLog && now - this.lastPacerLog > 1000) {
-      this.onLog(`🏃 Pacer: queue=${this.sendQueue.length}, tokens=${Math.round(this.pacerTokens)}`);
-      this.lastPacerLog = now;
-    }
+    if (this.lastPacerTick === 0) this.lastPacerTick = now;
+    const deltaMs = now - this.lastPacerTick;
+    this.lastPacerTick = now;
 
-    if (this.sendQueue.length === 0 || this.ws?.readyState !== WebSocket.OPEN) return;
-
-    // Prevent huge bursts if setInterval was throttled in background
-    const pacerDeltaMs = Math.min(50, now - this.lastPacerRun);
-    if (pacerDeltaMs <= 0) return;
-    this.lastPacerRun = now;
+    if (deltaMs <= 0) return;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
+    let currentBytesPerMs = bytesPerMs;
 
-    // 1. Строгий лимит на "выброс". Максимум 15-20 КБ за один тик.
-    // Этого хватит для плавного проброса 1-2 дельта-кадров, но огромный I-кадр
-    // будет аккуратно поделен на части.
-    const maxPacerBurst = Math.max(15000, bytesPerMs * 40);
+    // 🚀 АНТИ-УДУШЬЕ (Dynamic Boost)
+    // Если кодек игнорирует низкий битрейт и очередь растет — ускоряем отправку!
+    if (this.sendQueue.length > 20) currentBytesPerMs = bytesPerMs * 1.5;
+    if (this.sendQueue.length > 50) currentBytesPerMs = bytesPerMs * 3.0;
+    if (this.sendQueue.length > 100) currentBytesPerMs = bytesPerMs * 5.0;
 
+    const tokensPerTick = currentBytesPerMs * deltaMs;
+    this.pacerTokens += tokensPerTick;
 
-    // Phase 3: Recover multiplier to clear bursts
-    const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1;
+    // Лимиты с учетом текущего форсажа
+    const maxPacerBurst = Math.max(15000, currentBytesPerMs * 40);
+    const maxPacerDebt = -3000;
 
-    this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
-
-    let bytesSentThisTick = 0;
-    // Увеличено до 128KB, так как интервал таймера теперь 20мс вместо 5мс
-    const MAX_BYTES_PER_TICK = 131072;
-
-    while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
-      const chunk = this.sendQueue[0].data;
-      this.ws.send(chunk);
-      this.pacerTokens -= chunk.length;
-      this.bytesSentThisSecond += chunk.length;
-      bytesSentThisTick += chunk.length;
-      this.sendQueue.shift();
+    if (this.pacerTokens > maxPacerBurst) {
+      this.pacerTokens = maxPacerBurst;
     }
 
-    // Защита от глубокого минуса токенов (минимум 100 КБ долга или 1.5 сек)
-    // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
-    const calculatedDebt = -(this.targetBitrate / 8) * 1.5;
-    // 2. Строгий запрет на глубокий долг!
-    // Как только ушли в минус на размер пары фрагментов (около 3000 байт) - стоп!
-    // Pacer замолчит и будет ждать следующего тика таймера.
-    const maxPacerDebt = -3000;
+    let bytesSentThisTick = 0;
+    const MAX_BYTES_PER_TICK = 131072;
+
+    while (this.sendQueue.length > 0 && this.pacerTokens > 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+      const packet = this.sendQueue.shift()!;
+      this.ws.send(packet.data);
+      this.pacerTokens -= packet.data.length;
+      bytesSentThisTick += packet.data.length;
+    }
 
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
@@ -810,7 +801,7 @@ export class AdaptiveH264Engine {
     // FIX: Removed strict encoding skip (Task 30). 
     // It was causing sudden FPS drops. Now we let the Pacer handle it via queue pruning.
 
-    const maxPending = this.targetBitrate > 5000000 ? 30 : 15;
+    const maxPending = 30;
     if (this.pendingFrames > maxPending || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > (maxPending - 2)) {
         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
