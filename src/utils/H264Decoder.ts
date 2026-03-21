@@ -225,6 +225,12 @@ export class H264Decoder {
         this.firstSenderTs = -1;
         requestAnimationFrame(this.playNext);
         return;
+      } else if (latestKeyIdx === -1) {
+        if (this.onLog) this.onLog(`\u23E9 Panic Reset: NO KEYFRAME IN BUFFER. Dropping all ${this.jitterBuffer.length} frames.`);
+        this.jitterBuffer = [];
+        this.firstSenderTs = -1;
+        if (this.onRequestKeyframe) this.onRequestKeyframe(true);
+        return;
       }
     }
 

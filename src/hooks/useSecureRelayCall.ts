@@ -441,9 +441,9 @@ export function useSecureRelayCall(
         const senderTs = startTimeRef.current > 0 ? Math.floor(performance.now() - startTimeRef.current) : 0;
         const buffered = wsRef.current.bufferedAmount || 0;
         
-        // FIX: RTT Bufferbloat. Если буфер сокета > 16 КБ, дропаем аудио!
+        // FIX: RTT Bufferbloat. Если буфер сокета > 64 КБ, дропаем аудио!
         // Это предотвратит рост пинга до 15 секунд при забитом канале.
-        if (buffered > 16384) {
+        if (buffered > 65536) {
           return; 
         }
         

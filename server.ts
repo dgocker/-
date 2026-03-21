@@ -68,19 +68,20 @@ async function startServer() {
     const senderId = Math.random().toString(36).substring(7);
     (ws as any).id = senderId;
 
-    /* 
     // Optimization: Let the OS handle socket buffers for better throughput on high-bandwidth links.
     // Manual limits (64KB) were causing protocol-level bottlenecks (~10Mbps cap).
     const rawSocket = (ws as any)._socket;
-    if (rawSocket && typeof rawSocket.setSendBufferSize === 'function') {
-      try {
-        rawSocket.setSendBufferSize(128 * 1024);
-        rawSocket.setReceiveBufferSize(128 * 1024);
-      } catch (e) {
-        console.warn('⚠️ Failed to tune socket buffers:', (e as Error).message);
+    if (rawSocket) {
+      if (typeof rawSocket.setNoDelay === 'function') rawSocket.setNoDelay(true);
+      if (typeof rawSocket.setSendBufferSize === 'function') {
+        try {
+          rawSocket.setSendBufferSize(256 * 1024);
+          rawSocket.setReceiveBufferSize(256 * 1024);
+        } catch (e) {
+          console.warn('⚠️ Failed to tune socket buffers:', (e as Error).message);
+        }
       }
     }
-    */
 
     if (!roomId) {
       ws.close();
@@ -127,7 +128,11 @@ async function startServer() {
             }
 
             // Safety drop for extreme congestion
-            if (isBinary && client.bufferedAmount > 524288) { // 512KB limit
+            const MAX_BUFFER = 5242880; // 5 MB
+            if (isBinary && client.bufferedAmount > MAX_BUFFER) {
+              try {
+                ws.send(JSON.stringify({ type: 'requestKeyframe', target: (client as any).id, reason: 'server_buffer_drop' }));
+              } catch(e) {}
               return;
             }
 

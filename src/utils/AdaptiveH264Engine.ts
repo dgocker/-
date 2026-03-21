@@ -240,7 +240,7 @@ export class AdaptiveH264Engine {
 
   // === ДОБАВЛЯЕМ МЕТОД ИЗ ТЕСТА ===
   private async processEncodedFrame(data: Uint8Array, startTime: number) {
-    if (data.length > 250000) {
+    if (data.length > 1500000) {
       if (this.onLog) this.onLog(`🚨 CRITICAL: Frame size too large (${Math.round(data.length / 1024)}KB). Dropping to prevent buffer bloat.`);
       this.needsKeyframe = true;
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
@@ -333,14 +333,14 @@ export class AdaptiveH264Engine {
     }
   }
 
-  private applyBitrateToParams() {
+  private applyBitrateToParams(force: boolean = false) {
     if (!this.encoder || !this.isConfigured) return;
 
     // FIX: I-Frame Storm & Encoder Hang Mitigation (Task 25).
     // Changing resolutions forces huge I-Frames and can hang Android hardware.
     // Enforce 2s cooldown for any re-configuration.
     const now = performance.now();
-    if (now - this.lastConfiguredTs < 2000) return;
+    if (!force && now - this.lastConfiguredTs < 2000) return;
 
     const kbps = this.targetBitrate / 1024;
 
@@ -456,8 +456,8 @@ export class AdaptiveH264Engine {
     // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс (для мобилок это край), режем битрейт.
     if (rtt > 1200 && now - this.lastCongestionTs > 500) {
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
-      // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, очищая токены
-      this.pacerTokens = -50000; 
+      // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, но без глубоких минусов.
+      this.pacerTokens = Math.max(-5000, this.pacerTokens); 
       this.tokenBucketBytes = 40000; // Reset debt to allow restart! (Task 27)
 
       this.applyBitrateToParams();
@@ -631,7 +631,7 @@ export class AdaptiveH264Engine {
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
 
       // СТАЛО (разрешаем уходить в минус на размер 4 секундного битрейта, чтобы I-кадры не сталлили движок на старте):
-      const maxDebt = -(this.targetBitrate / 8) * 4; 
+      const maxDebt = Math.max(-100000, -(this.targetBitrate / 8) * 4); 
       if (this.tokenBucketBytes < maxDebt) {
         this.tokenBucketBytes = maxDebt;
       }
@@ -732,7 +732,8 @@ export class AdaptiveH264Engine {
 
     if (this.sendQueue.length === 0 || this.ws?.readyState !== WebSocket.OPEN) return;
 
-    const pacerDeltaMs = now - this.lastPacerRun;
+    // Prevent huge bursts if setInterval was throttled in background
+    const pacerDeltaMs = Math.min(50, now - this.lastPacerRun);
     if (pacerDeltaMs <= 0) return;
     this.lastPacerRun = now;
 
@@ -766,8 +767,9 @@ export class AdaptiveH264Engine {
     // FIX: Removed strict encoding skip (Task 30). 
     // It was causing sudden FPS drops. Now we let the Pacer handle it via queue pruning.
 
-    if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
-      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > 6) {
+    const maxPending = this.targetBitrate > 5000000 ? 30 : 15;
+    if (this.pendingFrames > maxPending || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
+      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > (maxPending - 2)) {
         this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
       }
 
@@ -824,6 +826,7 @@ export class AdaptiveH264Engine {
     this.aiState = 'congested';
     this.lastCongestionTs = performance.now();
     this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.7);
-    this.applyBitrateToParams();
+    this.pacerTokens = Math.min(this.pacerTokens, 0);
+    this.applyBitrateToParams(true);
   }
 }
