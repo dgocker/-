@@ -293,7 +293,7 @@ export function useSecureRelayCall(
   // PCM Audio Receiver
   const receiverAudioContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const SAMPLE_RATE = 16000; // Reduced from 16000 to save bandwidth (128kbps instead of 256kbps)
+  const SAMPLE_RATE = 8000; // FIX: Reduced to 8000 to save bandwidth (~65kbps total)
 
   const initAudioContexts = () => {
     if (isCleanedUpRef.current) return;

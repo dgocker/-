@@ -700,13 +700,13 @@ export class AdaptiveH264Engine {
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
 
     // СТАЛО (убираем ускорение, вводим легкое торможение при заторе):
-    const multiplier = this.sendQueue.length > 10 ? 0.9 : 1.0;
+    const multiplier = this.sendQueue.length > 30 ? 0.9 : 1.0;
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
     // Снижаем лимит на один цикл таймера (разгружаем Event Loop и сокет)
-    const MAX_BYTES_PER_TICK = 32768; // Было 131072. Уменьшаем размер чанка за 1 тик таймера (10мс)
+    const MAX_BYTES_PER_TICK = 16384; 
 
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
@@ -721,6 +721,13 @@ export class AdaptiveH264Engine {
   private async processFrame(now: number): Promise<boolean> {
     if (this.onLog && this.frameId % 300 === 0) {
       this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
+    }
+
+    // FIX: Enforce Strict Token Bucket. If we have no tokens, skip encoding to naturally drop FPS
+    // Always allow I-frames or at least 1 frame per second to keep connection alive
+    const forceAlive = this.frameId === 0 || this.needsKeyframe || this.frameId % 30 === 0;
+    if (this.tokenBucketBytes <= 0 && !forceAlive) {
+      return false; // rate limiting!
     }
 
     if (this.pendingFrames > 8 || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {

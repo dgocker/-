@@ -1,5 +1,5 @@
 export async function obfuscateSplit(raw: Uint8Array, frameId: number = 0, senderTs: number = 0): Promise<Uint8Array[]> {
-  const MAX_CHUNK_SIZE = 16384; // Task 17: Increased to 16KB for TCP efficiency
+  const MAX_CHUNK_SIZE = 1200; // FIX: TCP MTU size to prevent Pacer token starvation
   const partsCount = Math.ceil(raw.length / MAX_CHUNK_SIZE);
   const parts: Uint8Array[] = [];
   

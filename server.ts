@@ -72,8 +72,9 @@ async function startServer() {
     const rawSocket = (ws as any)._socket;
     if (rawSocket && typeof rawSocket.setSendBufferSize === 'function') {
       try {
-        rawSocket.setSendBufferSize(2 * 1024 * 1024); // 2 MB
-        rawSocket.setReceiveBufferSize(2 * 1024 * 1024); // 2 MB
+        // FIX: Bufferbloat prevention. 64KB instead of 2MB so TCP backpressure kicks in early
+        rawSocket.setSendBufferSize(64 * 1024);
+        rawSocket.setReceiveBufferSize(64 * 1024);
       } catch (e) {
         console.warn('⚠️ Failed to tune socket buffers:', (e as Error).message);
       }
