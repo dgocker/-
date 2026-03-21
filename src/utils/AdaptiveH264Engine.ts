@@ -120,7 +120,7 @@ export class AdaptiveH264Engine {
   private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
-  private minBitrate: number = 30_000;    // СТАЛО (30 кбит/с - ультра-низкий режим)
+  private minBitrate: number = 80_000;    // FIX: iOS WebCodecs freezes silently at <60k. 80k is safe floor.
   private maxBitrate: number = 2_500_000; // Было 4_000_000
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
