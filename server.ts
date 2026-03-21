@@ -111,6 +111,12 @@ async function startServer() {
 
         roomClients.forEach((client) => {
           if ((client !== ws || isLoopback) && client.readyState === WebSocket.OPEN) {
+            // FIX: Server-side Backpressure for slow receivers (Download < Upload).
+            // If the receiver's download link is too slow, their buffer will grow indefinitely.
+            // Drop binary (media) packets to keep the queue small and prevent 35,000ms RTT explosions.
+            if (isBinary && client.bufferedAmount > 16384) {
+              return; // Drop packet
+            }
             try {
               client.send(relayedMessage, { binary: isBinary });
             } catch (e) {
