@@ -61,57 +61,68 @@ export function useSecureRelayCall(
   const orientationListenerRef = useRef<(() => void) | null>(null);
 
   // === НОВЫЙ БЛОК: Слушатель команд управления через Socket.io ===
+  // === НОВЫЙ БЛОК: Слушатель команд управления через Socket.io ===
+  const handleMediaControlRef = useRef<((data: any) => void) | null>(null);
+
+  // Обновляем логику каждый рендер, но НЕ переподписываем сокет
+  handleMediaControlRef.current = (data: any) => {
+    const { payload } = data;
+    const msg = payload;
+
+    if (msg.type === 'ping') {
+      socket?.emit('media_control', {
+        roomId: currentRoomIdRef.current,
+        payload: { type: 'pong', ts: msg.ts, sid: msg.sid }
+      });
+      return;
+    }
+    if (msg.type === 'pong') {
+      if (msg.sid !== mySidRef.current) return;
+      const rtt = Math.max(0, performance.now() - msg.ts);
+      rttRef.current = rtt;
+      setStats(prev => ({ ...prev, rtt }));
+      if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
+      (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
+      return;
+    }
+    if (msg.type === 'rotation') {
+      const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
+      if (firstDecoder) {
+        firstDecoder.setRotation(msg.value || msg.rotation);
+        if (msg.mirror !== undefined) firstDecoder.setMirror(msg.mirror);
+      }
+      return;
+    }
+    if (msg.type === 'requestKeyframe') {
+      if (adaptiveEngineRef.current) {
+        adaptiveEngineRef.current.forceKeyframe();
+        addLog('🚀 Remote requested keyframe via Socket.io, forcing now');
+      }
+      return;
+    }
+    if (msg.type === 'backpressure') {
+      if (adaptiveEngineRef.current) {
+        adaptiveEngineRef.current.triggerBackpressure(msg.rb);
+      }
+      return;
+    }
+  };
+
   useEffect(() => {
     if (!socket) return;
 
-    const handleMediaControl = (data: any) => {
-      const { payload } = data;
-      const msg = payload;
-
-      if (msg.type === 'ping') {
-        socket.emit('media_control', { 
-          roomId: currentRoomIdRef.current, 
-          payload: { type: 'pong', ts: msg.ts, sid: msg.sid } 
-        });
-        return;
-      }
-      if (msg.type === 'pong') {
-        if (msg.sid !== mySidRef.current) return;
-        const rtt = Math.max(0, performance.now() - msg.ts);
-        rttRef.current = rtt;
-        setStats(prev => ({ ...prev, rtt }));
-        if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
-        (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
-        return;
-      }
-      if (msg.type === 'rotation') {
-        const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
-        if (firstDecoder) {
-          firstDecoder.setRotation(msg.value || msg.rotation); // Поддержка обоих форматов
-          if (msg.mirror !== undefined) firstDecoder.setMirror(msg.mirror);
-        }
-        return;
-      }
-      if (msg.type === 'requestKeyframe') {
-        if (adaptiveEngineRef.current) {
-          adaptiveEngineRef.current.forceKeyframe();
-          addLog('🚀 Remote requested keyframe via Socket.io, forcing now');
-        }
-        return;
-      }
-      if (msg.type === 'backpressure') {
-        if (adaptiveEngineRef.current) {
-          adaptiveEngineRef.current.triggerBackpressure(msg.rb);
-        }
-        return;
+    // Этот слушатель висит вечно и никогда не "моргает"
+    const listener = (data: any) => {
+      if (handleMediaControlRef.current) {
+        handleMediaControlRef.current(data);
       }
     };
 
-    socket.on('media_control', handleMediaControl);
+    socket.on('media_control', listener);
     return () => {
-      socket.off('media_control', handleMediaControl);
+      socket.off('media_control', listener);
     };
-  }, [socket, addLog]);
+  }, [socket]); // <-- Убрали addLog из зависимостей
 
 
   const startPing = (ws: WebSocket) => {
@@ -122,9 +133,9 @@ export function useSecureRelayCall(
       if (ws.readyState === WebSocket.OPEN) {
         pingCounter++;
         if (pingCounter >= 2) { // Every 200ms (2 * 100ms) - Task 28
-          socket?.emit('media_control', { 
-            roomId: currentRoomIdRef.current, 
-            payload: { type: 'ping', ts: performance.now(), sid: mySidRef.current } 
+          socket?.emit('media_control', {
+            roomId: currentRoomIdRef.current,
+            payload: { type: 'ping', ts: performance.now(), sid: mySidRef.current }
           });
           pingCounter = 0;
         }
@@ -396,7 +407,7 @@ export function useSecureRelayCall(
         if (audioJitterBufferRef.current.length > 0) {
           const packet = audioJitterBufferRef.current[0];
           const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
-          const stats = firstDecoder?.getStats(); 
+          const stats = firstDecoder?.getStats();
 
           if (stats && stats.firstPlayoutTime > 0) {
             const videoOffset = packet.senderTs - stats.firstSenderTs;
@@ -496,13 +507,13 @@ export function useSecureRelayCall(
 
         const senderTs = startTimeRef.current > 0 ? Math.floor(performance.now() - startTimeRef.current) : 0;
         const buffered = wsRef.current.bufferedAmount || 0;
-        
+
         // FIX: RTT Bufferbloat. Если буфер сокета > 64 КБ, дропаем аудио!
         // Это предотвратит рост пинга до 15 секунд при забитом канале.
         if (buffered > 65536) {
-          return; 
+          return;
         }
-        
+
         wsRef.current.send(addPadding(finalBuffer, 3, senderTs));
       }
     };
@@ -670,9 +681,9 @@ export function useSecureRelayCall(
 
       // Send initial orientation (Confirmed by Audit 1, 3)
       const initialRotation = window.orientation || (window.screen as any).orientation?.angle || 0;
-      socket?.emit('media_control', { 
-        roomId: currentRoomIdRef.current, 
-        payload: { type: 'rotation', rotation: initialRotation, sid: mySidRef.current } 
+      socket?.emit('media_control', {
+        roomId: currentRoomIdRef.current,
+        payload: { type: 'rotation', rotation: initialRotation, sid: mySidRef.current }
       });
 
       // Force a fresh I-frame on reconnect to prevent artifacts
@@ -683,9 +694,9 @@ export function useSecureRelayCall(
       // Send OS info to help receiver correct orientation (Android fix)
       const isAndroid = /Android/i.test(navigator.userAgent);
       if (isAndroid) {
-        socket?.emit('media_control', { 
-          roomId: currentRoomIdRef.current, 
-          payload: { type: 'info', os: 'android', sid: mySidRef.current } 
+        socket?.emit('media_control', {
+          roomId: currentRoomIdRef.current,
+          payload: { type: 'info', os: 'android', sid: mySidRef.current }
         });
         addLog('📱 Signaling: I am on Android (sender)');
       }
@@ -870,9 +881,9 @@ export function useSecureRelayCall(
 
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  socket?.emit('media_control', { 
-                    roomId: currentRoomIdRef.current, 
-                    payload: { type: 'requestKeyframe', senderId } 
+                  socket?.emit('media_control', {
+                    roomId: currentRoomIdRef.current,
+                    payload: { type: 'requestKeyframe', senderId }
                   });
                   if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                 });
@@ -942,9 +953,9 @@ export function useSecureRelayCall(
               }
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  socket?.emit('media_control', { 
-                    roomId: currentRoomIdRef.current, 
-                    payload: { type: 'requestKeyframe', senderId } 
+                  socket?.emit('media_control', {
+                    roomId: currentRoomIdRef.current,
+                    payload: { type: 'requestKeyframe', senderId }
                   });
                   if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                 });
@@ -1020,14 +1031,14 @@ export function useSecureRelayCall(
   useEffect(() => {
     const handleOrientationChange = () => {
       const angle = window.orientation || (window.screen as any).orientation?.angle || 0;
-      socket?.emit('media_control', { 
-        roomId: currentRoomIdRef.current, 
-        payload: { type: 'rotation', rotation: angle, sid: mySidRef.current } 
+      socket?.emit('media_control', {
+        roomId: currentRoomIdRef.current,
+        payload: { type: 'rotation', rotation: angle, sid: mySidRef.current }
       });
     };
     window.addEventListener('orientationchange', handleOrientationChange);
     return () => window.removeEventListener('orientationchange', handleOrientationChange);
-  }, []);
+  }, [socket]); // <-- Обязательно добавили socket
 
 
   return {
