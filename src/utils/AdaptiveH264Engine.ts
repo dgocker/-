@@ -105,6 +105,7 @@ export class AdaptiveH264Engine {
 
   private encoder: VideoEncoder | null = null;
   private needsKeyframe: boolean = false;
+  private firstFrameFed: boolean = false;
   private isConfigured: boolean = false;
 
   private aiState: 'steady' | 'hold' | 'congested' | 'recovery' = 'steady';
@@ -120,7 +121,7 @@ export class AdaptiveH264Engine {
   private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
-  private minBitrate: number = 80_000;    // FIX: iOS WebCodecs freezes silently at <60k. 80k is safe floor.
+  private minBitrate: number = 150_000;   // Синхронизировано с хардкод-лимитом VideoEncoder для предотвращения desync
   private maxBitrate: number = 15_000_000; // Raised for 50Mbps support
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
@@ -556,8 +557,8 @@ export class AdaptiveH264Engine {
       this.loop().catch(() => {});
     }, 1000 / 30); // Target 30fps baseline
 
-    // Phase 2: Smooth Pacer (5ms ticks @ 16KB/tick) for "thin stream" traffic
-    this.pacerInterval = setInterval(() => this.runPacer(), 5); 
+    // Увеличиваем интервал до 20 мс, чтобы не душить Event Loop и давать время на E2EE шифрование
+    this.pacerInterval = setInterval(() => this.runPacer(), 20);
     this.lastAIUpdate = now;
     this.lastTokenUpdate = now;
     this.lastCongestionTs = 0;
@@ -595,6 +596,7 @@ export class AdaptiveH264Engine {
       this.encoder = null;
       this.isConfigured = false;
     }
+    this.firstFrameFed = false;
   }
 
   public isRunningNow() {
@@ -746,8 +748,8 @@ export class AdaptiveH264Engine {
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
-    // Phase 3: 64KB per tick (~100 Mbps burst capacity)
-    const MAX_BYTES_PER_TICK = 65536; 
+    // Увеличено до 128KB, так как интервал таймера теперь 20мс вместо 5мс
+    const MAX_BYTES_PER_TICK = 131072; 
     
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
@@ -795,8 +797,8 @@ export class AdaptiveH264Engine {
         this.configureEncoder(targetW, targetH);
       }
 
-      // Phase 2: Infinite GOP. Only force keyframe on the very first frame or on explicit demand.
-      if (this.frameId === 0) {
+      // Синхронный контроль первого кадра
+      if (!this.firstFrameFed) {
         this.needsKeyframe = true;
       }
 
@@ -806,13 +808,14 @@ export class AdaptiveH264Engine {
         return false;
       }
 
-      const isKey = this.needsKeyframe || this.frameId === 0;
+      const isKey = this.needsKeyframe || !this.firstFrameFed;
       if (isKey) {
           this.lastKeyframeSentTs = now;
       }
 
       this.pendingFrames++;
       this.encoder.encode(frame, { keyFrame: isKey });
+      this.firstFrameFed = true; // Устанавливаем флаг строго синхронно!
       this.needsKeyframe = false;
       frame.close();
       return true;
