@@ -121,7 +121,9 @@ export class AdaptiveH264Engine {
   private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
-  private minBitrate: number = 150_000;   // Синхронизировано с хардкод-лимитом VideoEncoder для предотвращения desync
+  // Возвращаем 60к, чтобы сеть могла "дышать" на EDGE/3G.
+  // При битрейте < 120k FPS упадет до 5, и энкодер аппаратно не сможет сгенерировать больше данных, даже если его внутренний лимит 150к.
+  private minBitrate: number = 60_000;   
   private maxBitrate: number = 15_000_000; // Raised for 50Mbps support
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
@@ -346,21 +348,14 @@ export class AdaptiveH264Engine {
     const kbps = this.targetBitrate / 1024;
 
     // Динамическое понижение FPS и разрешения при экстремальном падении
-    if (kbps < 120) {
-      this.currentFps = 5;
-      this.currentScale = 0.2;
-    } else if (kbps < 300) {
-      this.currentFps = 10;
-      this.currentScale = 0.4;
-    } else if (kbps < 700) {
-      this.currentFps = 15;
-      this.currentScale = 0.5; // Сделаем шаги четче
-    } else if (kbps < 1500) {
-      this.currentFps = 24;
-      this.currentScale = 0.75;
+    // FIX: Убрана агрессивная нарезка FPS до 5-10, которая делала слайд-шоу. 
+    // FIX: Убрана частая смена currentScale, из-за которой намертво зависал энкодер на iPhone.
+    if (kbps < 200) {
+      this.currentFps = 15; // Минимально комфортный FPS, никаких 5 кадров.
+      this.currentScale = 0.5; // Снижаем разрешение только в самом крайнем случае
     } else {
       this.currentFps = 30;
-      this.currentScale = 1.0;
+      this.currentScale = 1.0; // Держим нативное разрешение
     }
 
     // Применяем настройки только если битрейт изменился значимо (40%) или масштаб изменился
@@ -454,9 +449,10 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.lastRtt = rtt;
 
-    // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс (для мобилок это край), режем битрейт.
+    // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс.
+    // FIX: Режем только на 25% (0.75), так как на скоростном интернете это чаще всего временный Bufferbloat от наших же данных, а не смерть сети.
     if (rtt > 1200 && now - this.lastCongestionTs > 500) {
-      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.75);
       // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, но без глубоких минусов.
       this.pacerTokens = Math.max(-5000, this.pacerTokens); 
       this.tokenBucketBytes = 40000; // Reset debt to allow restart! (Task 27)
@@ -563,7 +559,7 @@ export class AdaptiveH264Engine {
     this.lastTokenUpdate = now;
     this.lastCongestionTs = 0;
     this.aiState = 'steady';
-    this.targetBitrate = 1_000_000; // Phase 3: High bandwidth start
+    this.targetBitrate = 400_000; // Безопасный старт без перегрузки роутера. Алгоритм сам поднимет до 1+ Mbps через пару секунд.
     this.frameId = 0;
     this.applyBitrateToParams();
     if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Probing mode (1Mbps start), GOP=Infinite`);
@@ -659,19 +655,12 @@ export class AdaptiveH264Engine {
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
       
-      // FIX: Proactive Queue Pruning (Task 24). Keep RTT under 2-3 seconds no matter what.
-      // If queue too long, drop oldest Delta frames.
-      if (this.sendQueue.length > 100) {
-        if (this.onLog) this.onLog(`\u2702\ufe0f Queue pruning: dropping ${this.sendQueue.length - 80} old delta frames`);
-        // Keep last 80 frames, but don't drop the very first one if it's a keyframe (actually keep 20 latest)
-        const toRemove = this.sendQueue.length - 40;
-        let removed = 0;
-        for (let i = 0; i < toRemove && i < this.sendQueue.length; i++) {
-          // Find if we have a keyframe in the first 'i' frames. We check the 'isKey' property (requires storing it)
-          // Since we don't store isKey, we just filter by frameId gaps or type if we had it.
-          // Let's just slice the oldest but keep the latest.
-        }
-        this.sendQueue = this.sendQueue.slice(toRemove);
+      // FIX: Умный сброс очереди. Нельзя делать slice массива фрагментов, это ломает H.264 кадр!
+      // Если очередь слишком большая, сбрасываем её полностью и запрашиваем чистый Keyframe.
+      if (this.sendQueue.length > 150) {
+        if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Dropping all and forcing Keyframe!`);
+        this.sendQueue = []; // Очищаем полностью, никаких огрызков
+        this.needsKeyframe = true; // Заставляем энкодер собрать картинку с нуля
       }
 
       const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
@@ -758,6 +747,13 @@ export class AdaptiveH264Engine {
       this.bytesSentThisSecond += chunk.length;
       bytesSentThisTick += chunk.length;
       this.sendQueue.shift();
+    }
+
+    // Защита от глубокого минуса токенов (не более 300мс долга)
+    // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
+    const maxPacerDebt = -(this.targetBitrate / 8) * 0.3; 
+    if (this.pacerTokens < maxPacerDebt) {
+      this.pacerTokens = maxPacerDebt;
     }
   }
 
