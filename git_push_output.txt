@@ -1,0 +1,10 @@
+ssh_askpass: exec(/usr/lib/ssh/ssh-askpass): No such file or directory
+Permission denied, please try again.
+ssh_askpass: exec(/usr/lib/ssh/ssh-askpass): No such file or directory
+Permission denied, please try again.
+ssh_askpass: exec(/usr/lib/ssh/ssh-askpass): No such file or directory
+root:d2evQMYClQ@45.10.244.13: Permission denied (publickey,password).
+fatal: Не удалось прочитать из внешнего репозитория.
+
+Удостоверьтесь, что у вас есть необходимые права доступа
+и репозиторий существует.

@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh, RotateCw, FlipHorizontal, FlipVertical, RefreshCw } from 'lucide-react';
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, Users, LogOut, Copy, CheckCircle2, Share2, SwitchCamera, Info, X, Trash2, Settings, SignalHigh, RotateCw, FlipHorizontal, FlipVertical, RefreshCw, Download } from 'lucide-react';
 import { useSecureRelayCall } from '../hooks/useSecureRelayCall';
 import { generateECDHKeyPair, exportPublicKey, importPublicKey, deriveAESKey } from '../utils/cryptoUtils';
 
@@ -105,6 +105,36 @@ export default function Dashboard() {
       showToast(`❌ Ошибка экспорта: ${e.message}`);
       addLog(`❌ Log export failed: ${e.message}`);
     }
+  };
+
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+    showToast('Файл сохранён');
+  };
+
+  const downloadAllLogs = () => {
+    let metricsSection = "\n\n=== CALL METRICS HISTORY ===\n";
+    if (metricHistory.length > 0) {
+      metricsSection += "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
+      metricHistory.forEach(m => {
+        const time = new Date(m.ts).toLocaleTimeString();
+        metricsSection += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
+      });
+    } else {
+      metricsSection += "No metrics available (call not started or too short).\n";
+    }
+    const fullLogs = logs.join('\n') + metricsSection;
+    downloadFile(fullLogs, `debug-logs-${Date.now()}.txt`, 'text/plain');
   };
   
   const showToast = useCallback((msg: string) => {
@@ -1476,13 +1506,22 @@ export default function Dashboard() {
                 <Settings className="text-zinc-400" />
                 Логи и Отладка
               </h2>
-              <button 
-                onClick={() => setShowLogs(false)}
-                className="p-2 hover:bg-zinc-800 rounded-full transition-colors"
-                title="Закрыть"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={downloadAllLogs}
+                  className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400 hover:text-white"
+                  title="Скачать все логи (.txt)"
+                >
+                  <Download size={20} />
+                </button>
+                <button 
+                  onClick={() => setShowLogs(false)}
+                  className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400 hover:text-white"
+                  title="Закрыть"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             {/* Tabs */}
@@ -1542,20 +1581,27 @@ export default function Dashboard() {
                   <button 
                     onClick={() => {
                       const data = JSON.stringify(metricHistory, null, 2);
-                      const blob = new Blob([data], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `metrics-${Date.now()}.json`;
-                      document.body.appendChild(a);
-                      a.click();
-                      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-                      showToast('Файл сохранён');
+                      downloadFile(data, `metrics-${Date.now()}.json`, 'application/json');
                     }}
                     className="flex-1 py-3 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     <SignalHigh size={16} />
                     Скачать .json
+                  </button>
+                  <button 
+                    onClick={() => {
+                      let text = "=== CALL METRICS HISTORY ===\n";
+                      text += "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
+                      metricHistory.forEach(m => {
+                        const time = new Date(m.ts).toLocaleTimeString();
+                        text += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
+                      });
+                      downloadFile(text, `metrics-${Date.now()}.txt`, 'text/plain');
+                    }}
+                    className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 border border-zinc-700"
+                  >
+                    <Download size={16} />
+                    Скачать .txt
                   </button>
                   <button 
                     onClick={() => showToast('Очищено — данные следующего звонка будут чистыми')}
@@ -1594,14 +1640,22 @@ export default function Dashboard() {
                     <Copy size={16} />
                     Копировать журнал
                   </button>
-                  <button 
-                onClick={exportLogs}
-                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
-                title="Отправить логи администратору"
-              >
-                <Share2 size={14} />
-                <span>Экспорт логов</span>
-              </button>
+                <button 
+                  onClick={exportLogs}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
+                  title="Отправить логи администратору"
+                >
+                  <Share2 size={14} />
+                  <span>Экспорт</span>
+                </button>
+                <button 
+                  onClick={() => downloadFile(logs.join('\n'), `system-log-${Date.now()}.log`, 'text/plain')}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors border border-zinc-700"
+                  title="Скачать системный журнал (.log)"
+                >
+                  <Download size={14} />
+                  <span>Скачать .log</span>
+                </button>
               <button 
                 onClick={() => setLogs([])}
                     className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl font-semibold transition-colors"
