@@ -181,6 +181,7 @@ export class AdaptiveH264Engine {
   private probingStartTs: number = 0;
   private isProbing: boolean = false;
   private lastSteadyIncrease: number = 0;
+  private lastRemoteJitter: number = 0;
 
   constructor(
     video: HTMLVideoElement,
@@ -484,6 +485,22 @@ export class AdaptiveH264Engine {
       this.delayTrend = (this.lastSmoothedRtt - prevSmoothed) / dt;
       this.lastUpdateTs = now;
       this.updateCongestionControl();
+    }
+  }
+
+  public updateRemoteJitter(jitter: number) {
+    this.lastRemoteJitter = jitter;
+    
+    // Если пакеты начали приходить неравномерно (jitter > 60мс),
+    // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
+    if (jitter > 60 && this.aiState !== 'congested') {
+      if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
+      
+      this.aiState = 'congested';
+      this.lastCongestionTs = performance.now();
+      // Срезаем битрейт на 20%, не дожидаясь паники по RTT
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.8);
+      this.applyBitrateToParams();
     }
   }
 

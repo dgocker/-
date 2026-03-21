@@ -76,9 +76,18 @@ export function useSecureRelayCall(
     const msg = payload;
 
     if (msg.type === 'ping') {
+      // Берем джиттер от первого активного декодера (если мы получаем видео)
+      const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
+      const currentJitter = firstDecoder ? firstDecoder.getStats().rfcJitter : 0;
+
       socketRef.current?.emit('media_control', {
         roomId: currentRoomIdRef.current,
-        payload: { type: 'pong', ts: msg.ts, sid: msg.sid }
+        payload: { 
+          type: 'pong', 
+          ts: msg.ts, 
+          sid: msg.sid,
+          jitter: currentJitter
+        }
       });
       return;
     }
@@ -87,7 +96,13 @@ export function useSecureRelayCall(
       const rtt = Math.max(0, performance.now() - msg.ts);
       rttRef.current = rtt;
       setStats(prev => ({ ...prev, rtt }));
-      if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
+      
+      if (adaptiveEngineRef.current) {
+        adaptiveEngineRef.current.updateRTT(rtt);
+        if (msg.jitter !== undefined) {
+          adaptiveEngineRef.current.updateRemoteJitter(msg.jitter);
+        }
+      }
       (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
       return;
     }

@@ -37,7 +37,9 @@ export class H264Decoder {
   private lastBufferEmptyTime = 0;
   private dropThreshold = 2000;
 
-  // Statistical Jitter tracking (Task 17)
+  // Statistical Jitter tracking (RFC 3550)
+  private rfcJitter: number = 0;
+  private lastTransitTime: number | null = null;
   private jitterLog: number[] = [];
   private lastReceiveTime = 0;
   private lastSenderTs = 0;
@@ -141,23 +143,36 @@ export class H264Decoder {
       this.onLog(`📦 Delta frame: frameId=${frameId}, size=${binary.length}`);
     }
 
-    // Adaptive Jitter Logic (Jitter = variance in arrival time)
+    // --- 1. РАСЧЕТ СЕТЕВОГО RFC JITTER (Для отправки отправителю) ---
+    const transitTime = now - senderTs;
+    if (this.lastTransitTime !== null) {
+      const d = transitTime - this.lastTransitTime;
+      // Сглаженный тренд
+      this.rfcJitter = this.rfcJitter + (Math.abs(d) - this.rfcJitter) / 16;
+    }
+    this.lastTransitTime = transitTime;
+    // ----------------------------------------------------------------
+
+    // --- 2. МГНОВЕННЫЙ ДЖИТТЕР (Для локального Jitter Buffer) ---
     if (this.lastSenderTs > 0) {
       const expectedArrive = this.lastReceiveTime + (senderTs - this.lastSenderTs);
-      const jitter = Math.max(0, now - expectedArrive);
-      this.jitterLog.push(jitter);
+      const instantJitter = Math.max(0, now - expectedArrive);
+      
+      this.jitterLog.push(instantJitter);
       if (this.jitterLog.length > 100) this.jitterLog.shift();
 
       if (this.jitterLog.length >= 10 && this.jitterLog.length % 10 === 0) {
         const sorted = [...this.jitterLog].sort((a, b) => a - b);
-        const p95 = sorted[Math.floor(sorted.length * 0.95)];
+        const p95 = sorted[Math.floor(sorted.length * 0.95)]; // Берем 95-й перцентиль
 
         const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
         
+        // Используем именно p95 для локального буфера, чтобы глотать скачки
         const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * multiplier)));
         this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
       }
     }
+    // ----------------------------------------------------------------
 
     this.lastReceiveTime = now;
     this.lastSenderTs = senderTs;
@@ -300,7 +315,8 @@ export class H264Decoder {
       bufferLength: this.jitterBuffer.length,
       firstSenderTs: this.firstSenderTs,
       firstPlayoutTime: this.firstPlayoutTime,
-      dropThreshold: this.dropThreshold
+      dropThreshold: this.dropThreshold,
+      rfcJitter: this.rfcJitter
     };
   }
 
