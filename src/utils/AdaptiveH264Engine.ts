@@ -123,8 +123,8 @@ export class AdaptiveH264Engine {
   private lastConfiguredTs: number = 0;
   // Возвращаем 60к, чтобы сеть могла "дышать" на EDGE/3G.
   // При битрейте < 120k FPS упадет до 5, и энкодер аппаратно не сможет сгенерировать больше данных, даже если его внутренний лимит 150к.
-  private minBitrate: number = 60_000;   
-  private maxBitrate: number = 15_000_000; // Raised for 50Mbps support
+  private minBitrate: number = 60_000;
+  private maxBitrate: number = 3_000_000; // Raised for 50Mbps support
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
   private lastEncodeTs: number = performance.now(); // Watchdog tracking
@@ -361,7 +361,7 @@ export class AdaptiveH264Engine {
 
     // Применяем настройки только если битрейт изменился значимо (40%) или масштаб изменился
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
-    
+
     if (diffRatio >= 0.4 || !this.isConfigured) {
       this.lastConfiguredBitrate = this.targetBitrate;
       this.lastConfiguredTs = now;
@@ -386,8 +386,9 @@ export class AdaptiveH264Engine {
 
     const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
 
-    // FIX: Снижаем допустимый лимит буфера для штрафа до 16 КБ (защита от OS Bufferbloat)
-    const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 0.5);
+    // FIX: Минимальный лимит буфера для штрафа - 256 КБ (защита от OS Bufferbloat)
+    // 16 КБ мгновенно убивали битрейт до 59k.
+    const maxWsBuffer = Math.max(262144, (this.targetBitrate / 8) * 0.5);
     const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
     if (bufferPressure > 0.3) {
       const penalty = (bufferPressure - 0.3) * 0.6;
@@ -407,7 +408,7 @@ export class AdaptiveH264Engine {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
         // Dynamic cut factor
-        let cutFactor = 0.85; 
+        let cutFactor = 0.85;
         if (this.lastSmoothedRtt > 1500) cutFactor = 0.6;
         if (this.lastSmoothedRtt > 3000) cutFactor = 0.3;
 
@@ -425,7 +426,7 @@ export class AdaptiveH264Engine {
       if (this.aiState === 'steady' && this.lastSmoothedRtt < 900) {
         if (now - this.lastSteadyIncrease > 400) {
           // Phase 3: Exponential growth (+10%) to leverage 50Mbps links quickly
-          const growth = this.targetBitrate * 0.10; 
+          const growth = this.targetBitrate * 0.10;
           this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + Math.max(20000, growth));
           this.lastSteadyIncrease = now;
         }
@@ -455,7 +456,7 @@ export class AdaptiveH264Engine {
     if (rtt > 1200 && now - this.lastCongestionTs > 500) {
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.75);
       // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, но без глубоких минусов.
-      this.pacerTokens = Math.max(-5000, this.pacerTokens); 
+      this.pacerTokens = Math.max(-5000, this.pacerTokens);
       this.tokenBucketBytes = 40000; // Reset debt to allow restart! (Task 27)
 
       this.applyBitrateToParams();
@@ -490,12 +491,12 @@ export class AdaptiveH264Engine {
 
   public updateRemoteJitter(jitter: number) {
     this.lastRemoteJitter = jitter;
-    
+
     // Если пакеты начали приходить неравномерно (jitter > 300мс),
     // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
     if (jitter > 300 && this.aiState !== 'congested') {
       if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
-      
+
       this.aiState = 'congested';
       this.lastCongestionTs = performance.now();
       // Срезаем битрейт на 20%, не дожидаясь паники по RTT
@@ -564,10 +565,10 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.sessionStartTime = now;
     this.lastPacerRun = performance.now();
-    
+
     // Switch to setInterval to prevent browser freezing in background tabs
     this.timerId = setInterval(() => {
-      this.loop().catch(() => {});
+      this.loop().catch(() => { });
     }, 1000 / 30); // Target 30fps baseline
 
     // Увеличиваем интервал до 20 мс, чтобы не душить Event Loop и давать время на E2EE шифрование
@@ -637,7 +638,7 @@ export class AdaptiveH264Engine {
     // Reset keyframe flag if within cooldown to prevent storm
     if (this.needsKeyframe && now - this.lastKeyframeSentTs < this.KEYFRAME_COOLDOWN) {
       if (this.frameId % 30 === 0 && this.onLog) {
-          this.onLog(`🛡️ Keyframe suppressed (cooldown: ${Math.round(this.KEYFRAME_COOLDOWN - (now - this.lastKeyframeSentTs))}ms remaining)`);
+        this.onLog(`🛡️ Keyframe suppressed (cooldown: ${Math.round(this.KEYFRAME_COOLDOWN - (now - this.lastKeyframeSentTs))}ms remaining)`);
       }
       this.needsKeyframe = false;
     }
@@ -649,18 +650,19 @@ export class AdaptiveH264Engine {
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
 
       // СТАЛО (разрешаем уходить в минус на размер 4 секундного битрейта, чтобы I-кадры не сталлили движок на старте):
-      const maxDebt = Math.max(-100000, -(this.targetBitrate / 8) * 4); 
+      const maxDebt = Math.max(-100000, -(this.targetBitrate / 8) * 4);
       if (this.tokenBucketBytes < maxDebt) {
         this.tokenBucketBytes = maxDebt;
       }
       this.lastTokenUpdate = now;
     }
 
-    // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
-    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) {
-      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
+    // FIX: Watchdog теперь смотрит на this.lastEncodeTs. 
+    // Нас волнует, когда энкодер реально ВЫДАЛ кадр в последний раз, а не когда мы пытались его запихнуть.
+    if (this.pendingFrames > 0 && now - this.lastEncodeTs > 2000) {
+      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck for >2s. Force resetting encoder...`);
       this.handleEncoderError();
-      this.lastPendingReset = now;
+      this.lastEncodeTs = now; // Сбрасываем таймер, чтобы не спамить
     }
 
     const frameInterval = 1000 / this.currentFps;
@@ -675,18 +677,15 @@ export class AdaptiveH264Engine {
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
       
-      // FIX: Умный сброс очереди. Нельзя делать slice массива фрагментов, это ломает H.264 кадр!
-      // Если очередь слишком большая, сбрасываем её полностью
-      if (this.sendQueue.length > 150) {
-        if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
-        
+      // FIX: Умный сброс очереди. Лимит в 150 кусков - это всего ~200 КБ.
+      // На 12 Мбит/с I-кадр весит больше! Увеличиваем до 1500 кусков (~2 МБ).
+      if (this.sendQueue.length > 1500 || queueBytes > 5120000) {
+        if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts, ${Math.round(queueBytes/1024)}KB). Soft reset.`);
         this.sendQueue = []; // Очищаем полностью
-        this.pacerTokens = Math.max(0, this.pacerTokens); // Сбрасываем долг пейсера, чтобы сразу слать
-        
-        // Режем битрейт не так радикально (на 30%, а не на 50%)
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.7);
+        this.pacerTokens = Math.max(0, this.pacerTokens); // Сбрасываем долг пейсера
+        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5); 
         this.applyBitrateToParams(true);
-
+        
         // МЫ ОБЯЗАНЫ запросить Keyframe, т.к. старые кадры удалены!
         // Но уважаем кулдаун, чтобы не убить процессор.
         if (now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
@@ -694,17 +693,16 @@ export class AdaptiveH264Engine {
         }
       }
 
-      const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
+      // Поднимаем лимит для внутренней критической паники до 10 МБ
+      const isInternalQueuePanic = this.sendQueue.length > 2000 || queueBytes > 10485760;
 
-      // Resolution scaling based on bitrate is now handled in applyBitrateToParams
-
-
-      const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 1.5);
+      // Увеличиваем минимальный порог буфера сокета (было 16384)
+      const maxWsBuffer = Math.max(262144, (this.targetBitrate / 8) * 1.5);
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
-        
+
         // FIX: Only request keyframe if NOT in cooldown
         if (this.droppedFramesConsecutive >= 3 && now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
           this.needsKeyframe = true;
@@ -727,7 +725,6 @@ export class AdaptiveH264Engine {
         if (success) {
           this.framesProcessedThisSecond++;
           this.droppedFramesConsecutive = 0;
-          this.lastPendingReset = now; // ✅ КРИТИЧЕСКИ ВАЖНО: сброс таймера зависания
         }
       }
     }
@@ -764,17 +761,18 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(60000, bytesPerMs * 150); // Разрешаем выброс до 60 КБ или 150мс
+    // FIX: Разрешаем Pacer'у мгновенно выплевывать куски до 250 КБ
+    const maxPacerBurst = Math.max(250000, bytesPerMs * 150); 
 
     // Phase 3: Recover multiplier to clear bursts
-    const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1; 
+    const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1;
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
     // Увеличено до 128KB, так как интервал таймера теперь 20мс вместо 5мс
-    const MAX_BYTES_PER_TICK = 131072; 
-    
+    const MAX_BYTES_PER_TICK = 131072;
+
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
       this.ws.send(chunk);
@@ -787,7 +785,7 @@ export class AdaptiveH264Engine {
     // Защита от глубокого минуса токенов (минимум 100 КБ долга или 1.5 сек)
     // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
     const calculatedDebt = -(this.targetBitrate / 8) * 1.5;
-    const maxPacerDebt = Math.min(-100000, calculatedDebt); 
+    const maxPacerDebt = Math.min(-100000, calculatedDebt);
 
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
@@ -843,7 +841,7 @@ export class AdaptiveH264Engine {
 
       const isKey = this.needsKeyframe || !this.firstFrameFed;
       if (isKey) {
-          this.lastKeyframeSentTs = now;
+        this.lastKeyframeSentTs = now;
       }
 
       this.pendingFrames++;
