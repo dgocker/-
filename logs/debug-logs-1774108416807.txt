@@ -1,0 +1,956 @@
+[18:52:16] 📱 User Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36
+[18:52:16] 🔌 Initializing Socket.io...
+[18:52:16] [INFO] Socket connected/reconnected with ID: MJFn494fkYHwO6pmAAAB
+[18:52:16] ✅ Socket connected with ID: MJFn494fkYHwO6pmAAAB
+[18:52:30] 📞 Incoming call from Admin1 (19)
+[18:52:30] ℹ️ Remote supports WebM: false
+[18:52:31] 📞 Answering call from Admin1
+[18:52:31] 🧹 Cleaning up call resources...
+[18:52:31] 📸 Requesting camera/mic access...
+[18:52:32] ✅ Media stream acquired
+[18:52:32]   - audio: По умолчанию (N/AxN/A @ N/Afps)
+[18:52:32]   - video: camera2 1, facing front (720x1280 @ 30fps)
+[18:52:32] 🔐 Generating E2EE keys...
+[18:52:32] ✅ E2EE Shared Secret established
+[18:52:32] 📡 Emitting answer_call, supportsWebM: true
+[18:52:32] 🔗 Connecting to Secure Relay room: room-r4e5vi
+[18:52:32] 📡 WebSocket URL: wss://vidapp.ru/secure-relay?room=room-r4e5vi&token=ad6c58aa-cb76-4478-91d2-c92b5a2fdb99
+[18:52:32] ℹ️ MediaSource skipped in Secure Relay (H.264/PCM) mode
+[18:52:33] [INFO] Connected to Secure Relay
+[18:52:33] ✅ WebSocket connected to Relay
+[18:52:33] 📱 Signaling: I am on Android (sender)
+[18:52:33] 🎥 Starting media recording (H.264 Priority)...
+[18:52:33] 🎙️ PCM sender started
+[18:52:33] 🚀 Using H.264 + PCM Audio (Forced for all devices)
+[18:52:33] 🚀 Sender started: Probing mode (1Mbps start), GOP=Infinite
+[18:52:33] 🚀 Adaptive H.264 Engine started
+[18:52:33] 🔐 E2EE Shared Secret Hash: 3092b726
+[18:52:33] [INFO] 🔄 Connection restored/stable, ensuring remote video is playing
+[18:52:33] 🎬 processFrame: pending=0, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=0, queue=0, state=steady
+[18:52:33] ⚙️ Baseline Config: 720x1280 @ 1074k (Queue Flush + Boost)
+[18:52:33] 💯 Video frame parts: frameId=0, total=3, received=3
+[18:52:33] 🔐 First E2EE video frame from t4j6xg decrypted successfully
+[18:52:33] 🔄 Applied rotation: 0° (mirror=false)
+[18:52:33] 🔑 Keyframe detected: frameId=0, size=3049
+[18:52:33] ▶️ Starting playback, buffer: 1
+[18:52:33] 🎬 processFrame: pending=1, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=2, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=3, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=4, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=5, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=6, queue=0, state=steady
+[18:52:33] 🎬 processFrame: pending=7, queue=0, state=steady
+[18:52:33] ⚙️ Baseline Config: 540x960 @ 1182k (Queue Flush + Boost)
+[18:52:33] ▶️ Starting playback, buffer: 1
+[18:52:33] ✅ Encoded frame 0 (size=5983)
+[18:52:33] ✅ Encoded frame 0 (size=5183)
+[18:52:33] ✅ Encoded frame 0 (size=5183)
+[18:52:33] ✅ Encoded frame 0 (size=4095)
+[18:52:33] 🏃 Pacer: queue=23, tokens=0
+[18:52:34] ▶️ Starting playback, buffer: 1
+[18:52:34] 🎙️ Mic OFF
+[18:52:34] ▶️ Starting playback, buffer: 1
+[18:52:34] 📤 Send rate: 367 kbps, buffer: 0 frames (0KB), tokens=81KB
+[18:52:34] 🔑 Keyframe detected: frameId=9, size=2099
+[18:52:34] ▶️ Starting playback, buffer: 1
+[18:52:34] ▶️ Starting playback, buffer: 1
+[18:52:34] ▶️ Starting playback, buffer: 1
+[18:52:34] 🏃 Pacer: queue=1, tokens=-633
+[18:52:35] ✅ Encoded frame 30 (size=944)
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] 📤 Send rate: 932 kbps, buffer: 0 frames (0KB), tokens=95KB
+[18:52:35] 🚨 RTT Panic (1555ms): Dropping to 629k and pausing Pacer
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] ▶️ Starting playback, buffer: 1
+[18:52:35] 🏃 Pacer: queue=36, tokens=-988
+[18:52:36] 🚨 RTT Panic (1757ms): Dropping to 252k and pausing Pacer
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:36] ⚙️ Baseline Config: 288x512 @ 252k (Queue Flush + Boost)
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:36] 📤 Send rate: 689 kbps, buffer: 0 frames (0KB), tokens=13KB
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:36] ✅ Encoded frame 60 (size=768)
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:36] ▶️ Starting playback, buffer: 1
+[18:52:37] 💯 Video frame parts: frameId=30, total=3, received=3
+[18:52:37] ▶️ Starting playback, buffer: 1
+[18:52:37] 🏃 Pacer: queue=2, tokens=574
+[18:52:37] ▶️ Starting playback, buffer: 1
+[18:52:37] ▶️ Starting playback, buffer: 1
+[18:52:37] 📤 Send rate: 101 kbps, buffer: 0 frames (0KB), tokens=8KB
+[18:52:37] ▶️ Starting playback, buffer: 1
+[18:52:37] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] 🏃 Pacer: queue=2, tokens=-357
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ⚙️ Baseline Config: 144x256 @ 81k (Queue Flush + Boost)
+[18:52:38] 📤 Send rate: 108 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:38] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] 🏃 Pacer: queue=1, tokens=746
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] 📤 Send rate: 9 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] 💯 Video frame parts: frameId=60, total=1, received=1
+[18:52:39] 🔑 Keyframe detected: frameId=60, size=912
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:39] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] 🎬 Playing frame 71, gap=3ms
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] 🏃 Pacer: queue=1, tokens=1721
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] 📤 Send rate: 11 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] 🎬 Playing frame 78, gap=7ms
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ✅ Encoded frame 90 (size=224)
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:40] ▶️ Starting playback, buffer: 1
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] 🔑 Keyframe detected: frameId=93, size=565
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] 🏃 Pacer: queue=1, tokens=1416
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:41] 🔑 Keyframe detected: frameId=111, size=236
+[18:52:41] 📤 Send rate: 18 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:52:41] ▶️ Starting playback, buffer: 1
+[18:52:42] 💯 Video frame parts: frameId=120, total=1, received=1
+[18:52:42] 📦 Delta frame: frameId=120, size=340
+[18:52:42] 📤 Send rate: 25 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:52:42] 🏃 Pacer: queue=1, tokens=866
+[18:52:43] ⚙️ Baseline Config: 144x256 @ 117k (Queue Flush + Boost)
+[18:52:43] 📤 Send rate: 27 kbps, buffer: 0 frames (0KB), tokens=39KB
+[18:52:43] 🏃 Pacer: queue=1, tokens=-2
+[18:52:43] 🔑 Keyframe detected: frameId=127, size=233
+[18:52:44] 📤 Send rate: 34 kbps, buffer: 0 frames (0KB), tokens=10KB
+[18:52:44] 🏃 Pacer: queue=1, tokens=829
+[18:52:45] ⚙️ Baseline Config: 288x512 @ 215k (Queue Flush + Boost)
+[18:52:45] 📤 Send rate: 27 kbps, buffer: 0 frames (0KB), tokens=13KB
+[18:52:45] 🏃 Pacer: queue=2, tokens=1209
+[18:52:46] ✅ Encoded frame 120 (size=448)
+[18:52:46] 📤 Send rate: 59 kbps, buffer: 0 frames (0KB), tokens=16KB
+[18:52:46] 🏃 Pacer: queue=1, tokens=953
+[18:52:47] 🔑 Keyframe detected: frameId=144, size=741
+[18:52:47] 📤 Send rate: 158 kbps, buffer: 1 frames (0KB), tokens=10KB
+[18:52:47] 🏃 Pacer: queue=2, tokens=-386
+[18:52:48] 💯 Video frame parts: frameId=150, total=3, received=3
+[18:52:48] 📤 Send rate: 187 kbps, buffer: 0 frames (0KB), tokens=10KB
+[18:52:48] 🏃 Pacer: queue=1, tokens=-1000
+[18:52:49] ✅ Encoded frame 150 (size=2256)
+[18:52:49] 🎬 Playing frame 161, gap=410ms
+[18:52:49] 📤 Send rate: 177 kbps, buffer: 0 frames (0KB), tokens=12KB
+[18:52:49] 🏃 Pacer: queue=2, tokens=-202
+[18:52:50] 🔑 Keyframe detected: frameId=172, size=678
+[18:52:50] 📤 Send rate: 227 kbps, buffer: 1 frames (0KB), tokens=15KB
+[18:52:50] 🏃 Pacer: queue=3, tokens=-1
+[18:52:51] ⚙️ Baseline Config: 360x640 @ 314k (Queue Flush + Boost)
+[18:52:51] 💯 Video frame parts: frameId=180, total=3, received=3
+[18:52:51] 📦 Delta frame: frameId=180, size=3475
+[18:52:51] 📤 Send rate: 159 kbps, buffer: 0 frames (0KB), tokens=14KB
+[18:52:51] ✅ Encoded frame 180 (size=2160)
+[18:52:51] 🏃 Pacer: queue=2, tokens=190
+[18:52:52] 📤 Send rate: 269 kbps, buffer: 8 frames (8KB), tokens=1KB
+[18:52:52] 🏃 Pacer: queue=6, tokens=-844
+[18:52:53] ⚙️ Baseline Config: 288x512 @ 275k (Queue Flush + Boost)
+[18:52:53] 📤 Send rate: 311 kbps, buffer: 0 frames (0KB), tokens=17KB
+[18:52:53] 🔑 Keyframe detected: frameId=208, size=1020
+[18:52:53] 🏃 Pacer: queue=1, tokens=1273
+[18:52:54] ⚙️ Baseline Config: 360x640 @ 302k (Queue Flush + Boost)
+[18:52:54] 💯 Video frame parts: frameId=210, total=1, received=1
+[18:52:54] ✅ Encoded frame 210 (size=2639)
+[18:52:54] ✅ Encoded frame 210 (size=560)
+[18:52:54] 🔑 Keyframe detected: frameId=220, size=963
+[18:52:54] 📤 Send rate: 121 kbps, buffer: 0 frames (0KB), tokens=21KB
+[18:52:55] 🏃 Pacer: queue=1, tokens=-159
+[18:52:55] ⚙️ Baseline Config: 360x640 @ 443k (Queue Flush + Boost)
+[18:52:55] 📤 Send rate: 373 kbps, buffer: 0 frames (0KB), tokens=28KB
+[18:52:56] 🏃 Pacer: queue=3, tokens=682
+[18:52:56] ✅ Encoded frame 240 (size=160)
+[18:52:56] ▶️ Starting playback, buffer: 1
+[18:52:56] ▶️ Starting playback, buffer: 1
+[18:52:56] 📤 Send rate: 233 kbps, buffer: 0 frames (0KB), tokens=16KB
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] 🏃 Pacer: queue=2, tokens=-75
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] 💯 Video frame parts: frameId=240, total=3, received=3
+[18:52:57] 📦 Delta frame: frameId=240, size=2377
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ▶️ Starting playback, buffer: 1
+[18:52:57] ⚙️ Baseline Config: 288x512 @ 167k (Queue Flush + Boost)
+[18:52:57] 📤 Send rate: 175 kbps, buffer: 0 frames (0KB), tokens=9KB
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] 🏃 Pacer: queue=1, tokens=-131
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] ✅ Encoded frame 270 (size=208)
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] 🔑 Keyframe detected: frameId=262, size=763
+[18:52:58] ▶️ Starting playback, buffer: 1
+[18:52:58] 🔑 Keyframe detected: frameId=267, size=648
+[18:52:58] 💯 Video frame parts: frameId=270, total=1, received=1
+[18:52:59] 📤 Send rate: 40 kbps, buffer: 0 frames (0KB), tokens=6KB
+[18:52:59] 🏃 Pacer: queue=1, tokens=537
+[18:53:00] 📤 Send rate: 125 kbps, buffer: 10 frames (9KB), tokens=-5KB
+[18:53:00] 🏃 Pacer: queue=11, tokens=-126
+[18:53:00] 🎬 Playing frame 282, gap=470ms
+[18:53:00] 🎬 Playing frame 286, gap=475ms
+[18:53:01] 📤 Send rate: 187 kbps, buffer: 11 frames (10KB), tokens=-13KB
+[18:53:01] 🏃 Pacer: queue=10, tokens=-734
+[18:53:01] 🎬 processFrame: pending=0, queue=8, state=steady
+[18:53:01] ✅ Encoded frame 300 (size=2448)
+[18:53:01] 🎬 Playing frame 293, gap=571ms
+[18:53:01] 💯 Video frame parts: frameId=300, total=3, received=3
+[18:53:01] 📦 Delta frame: frameId=300, size=2644
+[18:53:02] 📤 Send rate: 246 kbps, buffer: 5 frames (4KB), tokens=-16KB
+[18:53:02] 🏃 Pacer: queue=6, tokens=-291
+[18:53:02] 🔑 Keyframe detected: frameId=305, size=1046
+[18:53:02] ⚙️ Baseline Config: 288x512 @ 242k (Queue Flush + Boost)
+[18:53:03] 📤 Send rate: 245 kbps, buffer: 1 frames (0KB), tokens=15KB
+[18:53:03] 🏃 Pacer: queue=2, tokens=-222
+[18:53:03] 🎬 Playing frame 316, gap=417ms
+[18:53:03] 💯 Video frame parts: frameId=330, total=3, received=3
+[18:53:04] 📤 Send rate: 100 kbps, buffer: 0 frames (0KB), tokens=20KB
+[18:53:04] 🔑 Keyframe detected: frameId=334, size=1340
+[18:53:04] ✅ Encoded frame 330 (size=656)
+[18:53:04] 🏃 Pacer: queue=1, tokens=1305
+[18:53:04] ⚙️ Baseline Config: 360x640 @ 390k (Queue Flush + Boost)
+[18:53:05] 📤 Send rate: 109 kbps, buffer: 0 frames (0KB), tokens=24KB
+[18:53:05] 🏃 Pacer: queue=2, tokens=542
+[18:53:06] 📤 Send rate: 243 kbps, buffer: 1 frames (0KB), tokens=14KB
+[18:53:06] 🏃 Pacer: queue=2, tokens=-1191
+[18:53:06] ▶️ Starting playback, buffer: 1
+[18:53:06] ✅ Encoded frame 360 (size=2816)
+[18:53:06] 💯 Video frame parts: frameId=360, total=4, received=4
+[18:53:06] 📦 Delta frame: frameId=360, size=3974
+[18:53:06] ▶️ Starting playback, buffer: 1
+[18:53:06] ▶️ Starting playback, buffer: 1
+[18:53:06] ▶️ Starting playback, buffer: 1
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] 📤 Send rate: 263 kbps, buffer: 15 frames (14KB), tokens=-7KB
+[18:53:07] 🚨 RTT Panic (1368ms): Dropping to 78k and pausing Pacer
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] 🏃 Pacer: queue=18, tokens=-521
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] ⚙️ Baseline Config: 144x256 @ 78k (Queue Flush + Boost)
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:07] ▶️ Starting playback, buffer: 1
+[18:53:08] 📤 Send rate: 63 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:08] 🏃 Pacer: queue=1, tokens=1185
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:08] ▶️ Starting playback, buffer: 1
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] 📤 Send rate: 7 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] 🏃 Pacer: queue=1, tokens=1673
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:09] 💯 Video frame parts: frameId=390, total=1, received=1
+[18:53:09] 🔑 Keyframe detected: frameId=390, size=716
+[18:53:09] ▶️ Starting playback, buffer: 1
+[18:53:10] ▶️ Starting playback, buffer: 1
+[18:53:10] 🔑 Keyframe detected: frameId=393, size=397
+[18:53:10] 📤 Send rate: 14 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:53:10] ✅ Encoded frame 390 (size=416)
+[18:53:10] 🔑 Keyframe detected: frameId=396, size=417
+[18:53:10] 🏃 Pacer: queue=1, tokens=1512
+[18:53:11] 📤 Send rate: 22 kbps, buffer: 0 frames (0KB), tokens=5KB
+[18:53:11] ⚙️ Baseline Config: 144x256 @ 117k (Queue Flush + Boost)
+[18:53:11] 🏃 Pacer: queue=2, tokens=4
+[18:53:12] 📤 Send rate: 46 kbps, buffer: 0 frames (0KB), tokens=9KB
+[18:53:12] 🔑 Keyframe detected: frameId=405, size=723
+[18:53:12] 🎬 Playing frame 403, gap=722ms
+[18:53:13] 🏃 Pacer: queue=1, tokens=1321
+[18:53:13] 📤 Send rate: 30 kbps, buffer: 0 frames (0KB), tokens=11KB
+[18:53:13] ⚙️ Baseline Config: 288x512 @ 215k (Queue Flush + Boost)
+[18:53:14] 🏃 Pacer: queue=1, tokens=926
+[18:53:14] 📤 Send rate: 49 kbps, buffer: 0 frames (0KB), tokens=15KB
+[18:53:14] 💯 Video frame parts: frameId=420, total=2, received=2
+[18:53:14] 📦 Delta frame: frameId=420, size=1453
+[18:53:15] 🏃 Pacer: queue=2, tokens=80
+[18:53:15] ✅ Encoded frame 420 (size=1856)
+[18:53:15] 📤 Send rate: 101 kbps, buffer: 0 frames (0KB), tokens=11KB
+[18:53:16] 🏃 Pacer: queue=3, tokens=-59
+[18:53:16] 🎬 Playing frame 431, gap=603ms
+[18:53:16] 📤 Send rate: 198 kbps, buffer: 0 frames (0KB), tokens=11KB
+[18:53:16] 🔑 Keyframe detected: frameId=442, size=662
+[18:53:17] 🏃 Pacer: queue=2, tokens=-25
+[18:53:17] 📤 Send rate: 229 kbps, buffer: 1 frames (0KB), tokens=9KB
+[18:53:17] 💯 Video frame parts: frameId=450, total=3, received=3
+[18:53:18] 🏃 Pacer: queue=2, tokens=-27
+[18:53:18] ✅ Encoded frame 450 (size=1776)
+[18:53:18] 📤 Send rate: 187 kbps, buffer: 0 frames (0KB), tokens=17KB
+[18:53:18] ⚙️ Baseline Config: 360x640 @ 304k (Queue Flush + Boost)
+[18:53:19] 🏃 Pacer: queue=2, tokens=702
+[18:53:19] 📤 Send rate: 145 kbps, buffer: 0 frames (0KB), tokens=12KB
+[18:53:20] 🏃 Pacer: queue=13, tokens=-233
+[18:53:20] ✅ Encoded frame 480 (size=3504)
+[18:53:20] 📤 Send rate: 204 kbps, buffer: 16 frames (16KB), tokens=-11KB
+[18:53:20] 💯 Video frame parts: frameId=480, total=3, received=3
+[18:53:20] 📦 Delta frame: frameId=480, size=2426
+[18:53:21] 🏃 Pacer: queue=39, tokens=-1056
+[18:53:21] 📤 Send rate: 172 kbps, buffer: 52 frames (53KB), tokens=-54KB
+[18:53:21] ▶️ Starting playback, buffer: 1
+[18:53:21] ▶️ Starting playback, buffer: 1
+[18:53:21] ▶️ Starting playback, buffer: 1
+[18:53:21] ⚙️ Baseline Config: 288x512 @ 134k (Queue Flush + Boost)
+[18:53:22] 🏃 Pacer: queue=1, tokens=1449
+[18:53:22] 📤 Send rate: 84 kbps, buffer: 0 frames (0KB), tokens=10KB
+[18:53:22] ▶️ Starting playback, buffer: 1
+[18:53:22] ✅ Encoded frame 510 (size=992)
+[18:53:22] 🔑 Keyframe detected: frameId=503, size=223
+[18:53:22] 🔑 Keyframe detected: frameId=504, size=221
+[18:53:23] 🏃 Pacer: queue=1, tokens=-237
+[18:53:23] 📤 Send rate: 149 kbps, buffer: 0 frames (0KB), tokens=13KB
+[18:53:23] ⚙️ Baseline Config: 288x512 @ 233k (Queue Flush + Boost)
+[18:53:24] 💯 Video frame parts: frameId=510, total=1, received=1
+[18:53:24] 🏃 Pacer: queue=2, tokens=510
+[18:53:24] 📤 Send rate: 145 kbps, buffer: 0 frames (0KB), tokens=16KB
+[18:53:25] 🔑 Keyframe detected: frameId=516, size=534
+[18:53:25] 🏃 Pacer: queue=1, tokens=1305
+[18:53:25] 📤 Send rate: 63 kbps, buffer: 0 frames (0KB), tokens=21KB
+[18:53:25] ✅ Encoded frame 540 (size=992)
+[18:53:25] 🔑 Keyframe detected: frameId=517, size=537
+[18:53:25] ⚙️ Baseline Config: 360x640 @ 376k (Queue Flush + Boost)
+[18:53:26] 🏃 Pacer: queue=2, tokens=414
+[18:53:26] 📤 Send rate: 115 kbps, buffer: 0 frames (0KB), tokens=26KB
+[18:53:27] 🏃 Pacer: queue=3, tokens=-109
+[18:53:27] 📤 Send rate: 254 kbps, buffer: 1 frames (0KB), tokens=30KB
+[18:53:27] ✅ Encoded frame 570 (size=3840)
+[18:53:28] ⚙️ Baseline Config: 360x640 @ 605k (Queue Flush + Boost)
+[18:53:28] 💯 Video frame parts: frameId=540, total=2, received=2
+[18:53:28] 📦 Delta frame: frameId=540, size=1547
+[18:53:28] 🏃 Pacer: queue=3, tokens=-327
+[18:53:28] 📤 Send rate: 381 kbps, buffer: 0 frames (0KB), tokens=42KB
+[18:53:29] 🔑 Keyframe detected: frameId=552, size=525
+[18:53:29] 🏃 Pacer: queue=3, tokens=2607
+[18:53:29] 📤 Send rate: 261 kbps, buffer: 0 frames (0KB), tokens=50KB
+[18:53:29] 🎬 processFrame: pending=0, queue=0, state=steady
+[18:53:29] ✅ Encoded frame 600 (size=2896)
+[18:53:30] ⚙️ Baseline Config: 540x960 @ 975k (Queue Flush + Boost)
+[18:53:30] 🏃 Pacer: queue=1, tokens=1193
+[18:53:30] 📤 Send rate: 267 kbps, buffer: 0 frames (0KB), tokens=67KB
+[18:53:30] [INFO] Call ended by remote 19 35W7uJE25vx3m7XrAAAD
+[18:53:30] 🔌 Call ended by remote: 19
+[18:53:30] 🧹 Cleaning up call resources...
+[18:53:30] [ERROR] Auto-recovery play failed: {}
+[18:53:31] 🔌 WebSocket closed: 1005 
+[18:53:31] 🧹 Cleaning up call resources...
+
+=== CALL METRICS HISTORY ===
+Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State
+18:52:33, 0, 0, 0, steady, Normal
+18:52:33, 0, 0, 509, steady, Normal
+18:52:33, 0, 0, 560, steady, Normal
+18:52:33, 0, 0, 80, steady, Normal
+18:52:33, 0, 0, 542, steady, Normal
+18:52:34, 0, 0, 178, steady, Normal
+18:52:34, 0, 0, 588, steady, Normal
+18:52:34, 0, 0, 257, steady, Normal
+18:52:34, 0, 0, 595, steady, Normal
+18:52:34, 643, 17, 787, steady, Normal
+18:52:34, 643, 17, 568, steady, Normal
+18:52:34, 643, 17, 0, steady, Normal
+18:52:34, 643, 17, 630, steady, Normal
+18:52:34, 643, 17, 373, steady, Normal
+18:52:35, 643, 17, 0, steady, Normal
+18:52:35, 643, 17, 284, steady, Normal
+18:52:35, 643, 17, 189, steady, Normal
+18:52:35, 643, 17, 361, steady, Normal
+18:52:35, 643, 17, 585, steady, Normal
+18:52:35, 643, 25, 286, steady, Normal
+18:52:35, 1555, 25, 533, congested, Overuse
+18:52:35, 1555, 25, 583, congested, Overuse
+18:52:35, 1555, 25, 243, congested, Overuse
+18:52:35, 1555, 25, 352, congested, Overuse
+18:52:36, 1555, 25, 0, congested, Overuse
+18:52:36, 1757, 25, 794, congested, Overuse
+18:52:36, 1757, 25, 284, congested, Overuse
+18:52:36, 1757, 25, 284, congested, Overuse
+18:52:36, 1757, 25, 354, congested, Overuse
+18:52:36, 1757, 18, 303, congested, Overuse
+18:52:36, 1757, 18, 0, congested, Overuse
+18:52:36, 1757, 18, 946, congested, Overuse
+18:52:36, 1757, 18, 270, congested, Overuse
+18:52:36, 1757, 18, 270, congested, Overuse
+18:52:37, 1757, 18, 379, congested, Overuse
+18:52:37, 2518, 18, 606, congested, Overuse
+18:52:37, 2518, 18, 345, congested, Overuse
+18:52:37, 2518, 18, 270, congested, Overuse
+18:52:37, 2518, 18, 324, congested, Overuse
+18:52:37, 2518, 10, 0, congested, Overuse
+18:52:37, 2518, 10, 0, congested, Overuse
+18:52:37, 2518, 10, 0, congested, Overuse
+18:52:37, 3010, 10, 572, congested, Overuse
+18:52:37, 3010, 10, 0, congested, Overuse
+18:52:38, 3010, 10, 382, congested, Overuse
+18:52:38, 3010, 10, 612, congested, Overuse
+18:52:38, 3010, 10, 255, congested, Overuse
+18:52:38, 3010, 10, 320, congested, Overuse
+18:52:38, 3465, 10, 593, congested, Overuse
+18:52:38, 3465, 10, 667, congested, Overuse
+18:52:38, 3465, 9, 281, congested, Overuse
+18:52:38, 3465, 9, 678, congested, Overuse
+18:52:38, 3465, 9, 0, congested, Overuse
+18:52:38, 3694, 9, 512, congested, Overuse
+18:52:39, 3694, 9, 678, congested, Overuse
+18:52:39, 3694, 9, 284, congested, Overuse
+18:52:39, 3852, 9, 869, congested, Overuse
+18:52:39, 3852, 9, 1277, congested, Overuse
+18:52:39, 3852, 9, 623, congested, Overuse
+18:52:39, 3909, 9, 571, congested, Overuse
+18:52:39, 3909, 5, 1328, congested, Overuse
+18:52:39, 3747, 5, 1125, congested, Overuse
+18:52:39, 3658, 5, 913, congested, Overuse
+18:52:39, 3575, 5, 630, congested, Overuse
+18:52:40, 3575, 5, 0, congested, Overuse
+18:52:40, 3575, 5, 298, congested, Overuse
+18:52:40, 3688, 5, 334, congested, Overuse
+18:52:40, 3688, 5, 257, congested, Overuse
+18:52:40, 3662, 5, 669, congested, Overuse
+18:52:40, 3578, 5, 885, congested, Overuse
+18:52:40, 3499, 5, 677, congested, Overuse
+18:52:40, 3353, 5, 938, congested, Overuse
+18:52:40, 3353, 5, 572, congested, Overuse
+18:52:40, 3195, 5, 906, congested, Overuse
+18:52:41, 3195, 5, 614, congested, Overuse
+18:52:41, 2191, 5, 1245, congested, Overuse
+18:52:41, 2191, 5, 0, congested, Overuse
+18:52:41, 2191, 5, 0, congested, Overuse
+18:52:41, 2219, 5, 598, congested, Overuse
+18:52:41, 1590, 5, 1159, congested, Overuse
+18:52:41, 691, 5, 975, congested, Overuse
+18:52:41, 171, 5, 415, congested, Overuse
+18:52:41, 171, 5, 132, congested, Overuse
+18:52:41, 196, 5, 88, congested, Overuse
+18:52:42, 196, 5, 0, congested, Overuse
+18:52:42, 194, 5, 114, congested, Overuse
+18:52:42, 194, 5, 117, congested, Overuse
+18:52:42, 194, 5, 83, congested, Overuse
+18:52:42, 193, 5, 31, congested, Overuse
+18:52:42, 193, 5, 87, congested, Overuse
+18:52:42, 193, 5, 113, congested, Overuse
+18:52:42, 313, 5, 91, congested, Overuse
+18:52:42, 263, 5, 36, congested, Overuse
+18:52:42, 263, 5, 84, congested, Overuse
+18:52:43, 236, 5, 109, congested, Overuse
+18:52:43, 196, 5, 88, congested, Overuse
+18:52:43, 196, 5, 115, steady, Normal
+18:52:43, 196, 5, 0, steady, Normal
+18:52:43, 301, 5, 115, steady, Normal
+18:52:43, 301, 5, 84, steady, Normal
+18:52:43, 194, 5, 111, steady, Normal
+18:52:43, 211, 6, 4, steady, Normal
+18:52:43, 211, 6, 108, steady, Normal
+18:52:43, 191, 6, 85, steady, Normal
+18:52:44, 191, 6, 6, steady, Normal
+18:52:44, 191, 6, 159, steady, Normal
+18:52:44, 273, 6, 15, steady, Normal
+18:52:44, 182, 6, 88, steady, Normal
+18:52:44, 182, 6, 93, steady, Normal
+18:52:44, 182, 6, 0, steady, Normal
+18:52:44, 237, 6, 141, steady, Normal
+18:52:44, 237, 5, 83, steady, Normal
+18:52:44, 288, 5, 163, steady, Normal
+18:52:44, 191, 5, 81, steady, Normal
+18:52:45, 191, 5, 0, steady, Normal
+18:52:45, 191, 5, 167, steady, Normal
+18:52:45, 191, 5, 178, steady, Normal
+18:52:45, 388, 5, 106, steady, Normal
+18:52:45, 238, 5, 184, steady, Normal
+18:52:45, 238, 5, 84, steady, Normal
+18:52:45, 224, 5, 87, steady, Normal
+18:52:45, 224, 5, 80, steady, Normal
+18:52:45, 213, 5, 156, steady, Normal
+18:52:45, 187, 5, 90, steady, Normal
+18:52:46, 187, 5, 138, steady, Normal
+18:52:46, 190, 5, 4, steady, Normal
+18:52:46, 190, 5, 134, steady, Normal
+18:52:46, 190, 5, 0, steady, Normal
+18:52:46, 190, 5, 0, steady, Normal
+18:52:46, 190, 5, 0, steady, Normal
+18:52:46, 190, 5, 0, steady, Normal
+18:52:46, 190, 10, 86, steady, Normal
+18:52:46, 416, 10, 284, steady, Normal
+18:52:46, 346, 10, 306, steady, Normal
+18:52:47, 289, 10, 61, congested, Overuse
+18:52:47, 197, 10, 134, congested, Overuse
+18:52:47, 197, 10, 88, congested, Overuse
+18:52:47, 187, 10, 88, congested, Overuse
+18:52:47, 187, 10, 3, congested, Overuse
+18:52:47, 187, 10, 78, congested, Overuse
+18:52:47, 187, 10, 111, congested, Overuse
+18:52:47, 190, 10, 120, congested, Overuse
+18:52:47, 190, 10, 124, congested, Overuse
+18:52:47, 195, 10, 66, congested, Overuse
+18:52:48, 195, 10, 168, congested, Overuse
+18:52:48, 195, 10, 295, congested, Overuse
+18:52:48, 210, 10, 285, congested, Overuse
+18:52:48, 210, 10, 196, congested, Overuse
+18:52:48, 209, 10, 202, congested, Overuse
+18:52:48, 209, 10, 0, congested, Overuse
+18:52:48, 261, 10, 286, congested, Overuse
+18:52:48, 199, 10, 471, congested, Overuse
+18:52:48, 199, 11, 261, congested, Overuse
+18:52:48, 199, 11, 0, congested, Overuse
+18:52:49, 210, 11, 429, congested, Overuse
+18:52:49, 187, 11, 342, congested, Overuse
+18:52:49, 187, 11, 192, steady, Normal
+18:52:49, 196, 11, 287, steady, Normal
+18:52:49, 196, 11, 285, steady, Normal
+18:52:49, 196, 11, 174, steady, Normal
+18:52:49, 286, 11, 338, steady, Normal
+18:52:49, 286, 11, 21, steady, Normal
+18:52:49, 228, 10, 388, steady, Normal
+18:52:49, 187, 10, 271, steady, Normal
+18:52:50, 187, 10, 288, steady, Normal
+18:52:50, 187, 10, 165, steady, Normal
+18:52:50, 203, 10, 170, steady, Normal
+18:52:50, 203, 10, 61, steady, Normal
+18:52:50, 269, 10, 143, steady, Normal
+18:52:50, 269, 10, 82, steady, Normal
+18:52:50, 269, 10, 0, steady, Normal
+18:52:50, 370, 10, 241, steady, Normal
+18:52:50, 224, 10, 54, steady, Normal
+18:52:50, 224, 10, 265, steady, Normal
+18:52:51, 214, 10, 94, steady, Normal
+18:52:51, 214, 10, 423, steady, Normal
+18:52:51, 255, 10, 98, steady, Normal
+18:52:51, 255, 10, 536, steady, Normal
+18:52:51, 251, 10, 270, congested, Overuse
+18:52:51, 251, 10, 345, congested, Overuse
+18:52:51, 249, 10, 149, congested, Overuse
+18:52:51, 194, 10, 414, congested, Overuse
+18:52:51, 194, 10, 164, congested, Overuse
+18:52:51, 190, 14, 438, congested, Overuse
+18:52:52, 190, 14, 249, congested, Overuse
+18:52:52, 190, 14, 311, congested, Overuse
+18:52:52, 190, 14, 0, congested, Overuse
+18:52:52, 308, 14, 512, congested, Overuse
+18:52:52, 203, 14, 375, congested, Overuse
+18:52:52, 203, 14, 0, congested, Overuse
+18:52:52, 271, 14, 375, congested, Overuse
+18:52:52, 271, 14, 137, congested, Overuse
+18:52:52, 241, 14, 550, congested, Overuse
+18:52:52, 241, 15, 167, congested, Overuse
+18:52:53, 241, 15, 189, congested, Overuse
+18:52:53, 397, 15, 303, congested, Overuse
+18:52:53, 397, 15, 302, steady, Normal
+18:52:53, 314, 15, 637, steady, Normal
+18:52:53, 243, 15, 272, steady, Normal
+18:52:53, 243, 15, 254, steady, Normal
+18:52:53, 200, 15, 4, steady, Normal
+18:52:53, 200, 15, 529, steady, Normal
+18:52:53, 212, 15, 325, steady, Normal
+18:52:53, 212, 14, 363, steady, Normal
+18:52:54, 218, 14, 174, steady, Normal
+18:52:54, 181, 14, 118, steady, Normal
+18:52:54, 181, 14, 128, steady, Normal
+18:52:54, 199, 14, 69, steady, Normal
+18:52:54, 199, 14, 399, steady, Normal
+18:52:54, 195, 14, 361, steady, Normal
+18:52:54, 195, 14, 271, steady, Normal
+18:52:54, 195, 14, 420, steady, Normal
+18:52:54, 260, 14, 380, steady, Normal
+18:52:54, 188, 15, 143, steady, Normal
+18:52:55, 188, 15, 132, steady, Normal
+18:52:55, 178, 15, 256, steady, Normal
+18:52:55, 178, 15, 0, steady, Normal
+18:52:55, 178, 15, 298, steady, Normal
+18:52:55, 296, 15, 355, steady, Normal
+18:52:55, 296, 15, 189, steady, Normal
+18:52:55, 296, 15, 0, steady, Normal
+18:52:55, 296, 15, 242, steady, Normal
+18:52:55, 296, 15, 398, steady, Normal
+18:52:55, 494, 15, 582, steady, Normal
+18:52:56, 504, 15, 422, congested, Overuse
+18:52:56, 504, 15, 184, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 439, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 0, congested, Overuse
+18:52:56, 504, 15, 114, congested, Overuse
+18:52:57, 1268, 15, 405, congested, Overuse
+18:52:57, 1201, 15, 548, congested, Overuse
+18:52:57, 1201, 15, 485, congested, Overuse
+18:52:57, 1108, 15, 806, congested, Overuse
+18:52:57, 1026, 15, 288, congested, Overuse
+18:52:57, 917, 15, 1118, congested, Overuse
+18:52:57, 917, 15, 197, congested, Overuse
+18:52:57, 917, 15, 95, congested, Overuse
+18:52:57, 917, 15, 0, congested, Overuse
+18:52:57, 1190, 15, 205, congested, Overuse
+18:52:58, 1190, 15, 187, congested, Overuse
+18:52:58, 1190, 15, 335, congested, Overuse
+18:52:58, 1228, 15, 743, congested, Overuse
+18:52:58, 1120, 15, 875, congested, Overuse
+18:52:58, 1048, 15, 649, congested, Overuse
+18:52:58, 181, 15, 721, congested, Overuse
+18:52:58, 181, 15, 99, congested, Overuse
+18:52:58, 181, 15, 95, congested, Overuse
+18:52:58, 272, 15, 46, congested, Overuse
+18:52:58, 272, 15, 0, congested, Overuse
+18:52:59, 272, 10, 0, congested, Overuse
+18:52:59, 272, 10, 0, congested, Overuse
+18:52:59, 272, 10, 0, congested, Overuse
+18:52:59, 554, 10, 259, congested, Overuse
+18:52:59, 554, 10, 206, congested, Overuse
+18:52:59, 391, 10, 936, congested, Overuse
+18:52:59, 243, 10, 484, congested, Overuse
+18:52:59, 187, 10, 404, congested, Overuse
+18:52:59, 187, 10, 146, congested, Overuse
+18:52:59, 187, 10, 95, congested, Overuse
+18:53:00, 229, 10, 424, congested, Overuse
+18:53:00, 229, 10, 95, congested, Overuse
+18:53:00, 272, 10, 256, congested, Overuse
+18:53:00, 272, 10, 399, steady, Normal
+18:53:00, 214, 10, 192, steady, Normal
+18:53:00, 214, 10, 373, steady, Normal
+18:53:00, 214, 10, 80, steady, Normal
+18:53:00, 304, 10, 576, steady, Normal
+18:53:00, 304, 10, 381, steady, Normal
+18:53:00, 397, 10, 206, steady, Normal
+18:53:01, 275, 10, 251, steady, Normal
+18:53:01, 185, 10, 162, steady, Normal
+18:53:01, 185, 10, 457, steady, Normal
+18:53:01, 185, 10, 0, steady, Normal
+18:53:01, 261, 10, 353, steady, Normal
+18:53:01, 183, 10, 287, steady, Normal
+18:53:01, 183, 10, 212, steady, Normal
+18:53:01, 183, 10, 358, steady, Normal
+18:53:01, 226, 10, 307, steady, Normal
+18:53:01, 226, 10, 238, steady, Normal
+18:53:02, 193, 10, 89, steady, Normal
+18:53:02, 193, 10, 334, steady, Normal
+18:53:02, 296, 10, 194, steady, Normal
+18:53:02, 296, 10, 164, steady, Normal
+18:53:02, 218, 10, 140, steady, Normal
+18:53:02, 218, 10, 172, steady, Normal
+18:53:02, 233, 10, 334, steady, Normal
+18:53:02, 233, 10, 401, steady, Normal
+18:53:02, 204, 10, 335, steady, Normal
+18:53:02, 204, 10, 171, steady, Normal
+18:53:03, 267, 10, 594, steady, Normal
+18:53:03, 267, 10, 95, steady, Normal
+18:53:03, 267, 10, 305, steady, Normal
+18:53:03, 323, 10, 423, steady, Normal
+18:53:03, 263, 10, 637, steady, Normal
+18:53:03, 263, 10, 409, steady, Normal
+18:53:03, 227, 10, 415, steady, Normal
+18:53:03, 183, 10, 440, steady, Normal
+18:53:03, 183, 10, 271, steady, Normal
+18:53:03, 183, 10, 301, steady, Normal
+18:53:04, 286, 10, 364, steady, Normal
+18:53:04, 286, 11, 395, steady, Normal
+18:53:04, 204, 11, 112, steady, Normal
+18:53:04, 204, 11, 18, steady, Normal
+18:53:04, 208, 11, 268, steady, Normal
+18:53:04, 208, 11, 192, steady, Normal
+18:53:04, 208, 11, 0, steady, Normal
+18:53:04, 208, 11, 0, steady, Normal
+18:53:04, 208, 11, 0, steady, Normal
+18:53:04, 350, 11, 2693, steady, Normal
+18:53:05, 350, 11, 0, steady, Normal
+18:53:05, 350, 12, 0, steady, Normal
+18:53:05, 304, 12, 1350, congested, Overuse
+18:53:05, 304, 12, 476, congested, Overuse
+18:53:05, 255, 12, 761, congested, Overuse
+18:53:05, 255, 12, 3, congested, Overuse
+18:53:05, 255, 12, 0, congested, Overuse
+18:53:05, 312, 12, 1016, congested, Overuse
+18:53:05, 312, 12, 387, congested, Overuse
+18:53:05, 312, 12, 0, congested, Overuse
+18:53:06, 312, 12, 0, congested, Overuse
+18:53:06, 526, 12, 573, congested, Overuse
+18:53:06, 526, 15, 0, congested, Overuse
+18:53:06, 526, 15, 0, congested, Overuse
+18:53:06, 526, 15, 211, congested, Overuse
+18:53:06, 526, 15, 0, congested, Overuse
+18:53:06, 526, 15, 0, congested, Overuse
+18:53:06, 526, 15, 127, congested, Overuse
+18:53:06, 526, 15, 0, congested, Overuse
+18:53:06, 1167, 15, 487, congested, Overuse
+18:53:07, 1167, 15, 207, congested, Overuse
+18:53:07, 1167, 15, 352, congested, Overuse
+18:53:07, 1167, 15, 0, congested, Overuse
+18:53:07, 1368, 15, 745, congested, Overuse
+18:53:07, 1368, 15, 215, congested, Overuse
+18:53:07, 1368, 15, 0, congested, Overuse
+18:53:07, 1368, 15, 278, congested, Overuse
+18:53:07, 1368, 15, 224, congested, Overuse
+18:53:07, 1368, 15, 189, congested, Overuse
+18:53:07, 1368, 15, 299, congested, Overuse
+18:53:08, 1802, 15, 412, congested, Overuse
+18:53:08, 1802, 15, 94, congested, Overuse
+18:53:08, 1802, 6, 0, congested, Overuse
+18:53:08, 1955, 6, 98, congested, Overuse
+18:53:08, 1955, 6, 383, congested, Overuse
+18:53:08, 1955, 6, 189, congested, Overuse
+18:53:08, 1955, 6, 0, congested, Overuse
+18:53:08, 2128, 6, 426, congested, Overuse
+18:53:08, 2128, 6, 0, congested, Overuse
+18:53:08, 2174, 6, 1088, congested, Overuse
+18:53:09, 2093, 6, 1025, congested, Overuse
+18:53:09, 2093, 6, 359, congested, Overuse
+18:53:09, 2043, 5, 621, congested, Overuse
+18:53:09, 2043, 5, 588, congested, Overuse
+18:53:09, 2043, 5, 0, congested, Overuse
+18:53:09, 2043, 5, 0, congested, Overuse
+18:53:09, 2227, 5, 903, congested, Overuse
+18:53:09, 2200, 5, 621, congested, Overuse
+18:53:09, 1873, 5, 336, congested, Overuse
+18:53:09, 1322, 5, 440, congested, Overuse
+18:53:10, 849, 5, 422, congested, Overuse
+18:53:10, 188, 5, 551, congested, Overuse
+18:53:10, 188, 5, 32, congested, Overuse
+18:53:10, 188, 5, 87, congested, Overuse
+18:53:10, 270, 5, 94, congested, Overuse
+18:53:10, 270, 5, 81, congested, Overuse
+18:53:10, 212, 5, 97, congested, Overuse
+18:53:10, 212, 5, 3, congested, Overuse
+18:53:10, 203, 5, 123, congested, Overuse
+18:53:10, 177, 5, 86, congested, Overuse
+18:53:11, 177, 5, 89, congested, Overuse
+18:53:11, 170, 5, 6, congested, Overuse
+18:53:11, 170, 5, 93, congested, Overuse
+18:53:11, 170, 6, 87, congested, Overuse
+18:53:11, 170, 6, 0, steady, Normal
+18:53:11, 332, 6, 197, steady, Normal
+18:53:11, 205, 6, 55, steady, Normal
+18:53:11, 177, 6, 91, steady, Normal
+18:53:11, 177, 6, 143, steady, Normal
+18:53:11, 177, 6, 3, steady, Normal
+18:53:12, 177, 6, 0, steady, Normal
+18:53:12, 352, 6, 87, steady, Normal
+18:53:12, 294, 6, 286, steady, Normal
+18:53:12, 294, 5, 81, steady, Normal
+18:53:12, 219, 5, 132, steady, Normal
+18:53:12, 187, 5, 63, steady, Normal
+18:53:12, 187, 5, 84, steady, Normal
+18:53:12, 194, 5, 87, steady, Normal
+18:53:12, 194, 5, 84, steady, Normal
+18:53:12, 194, 5, 0, steady, Normal
+18:53:13, 199, 5, 174, steady, Normal
+18:53:13, 199, 5, 22, steady, Normal
+18:53:13, 209, 5, 115, steady, Normal
+18:53:13, 209, 5, 148, steady, Normal
+18:53:13, 203, 5, 108, steady, Normal
+18:53:13, 203, 5, 168, steady, Normal
+18:53:13, 251, 5, 145, steady, Normal
+18:53:13, 251, 5, 251, steady, Normal
+18:53:13, 291, 5, 120, steady, Normal
+18:53:13, 291, 5, 283, steady, Normal
+18:53:14, 207, 5, 128, steady, Normal
+18:53:14, 207, 5, 236, steady, Normal
+18:53:14, 279, 5, 242, steady, Normal
+18:53:14, 279, 7, 222, steady, Normal
+18:53:14, 259, 7, 87, steady, Normal
+18:53:14, 259, 7, 282, steady, Normal
+18:53:14, 259, 7, 0, steady, Normal
+18:53:14, 389, 7, 403, steady, Normal
+18:53:14, 275, 7, 157, steady, Normal
+18:53:14, 275, 7, 229, steady, Normal
+18:53:15, 237, 7, 342, congested, Overuse
+18:53:15, 237, 7, 246, congested, Overuse
+18:53:15, 211, 7, 330, congested, Overuse
+18:53:15, 175, 7, 170, congested, Overuse
+18:53:15, 175, 10, 83, congested, Overuse
+18:53:15, 175, 10, 238, congested, Overuse
+18:53:15, 251, 10, 298, congested, Overuse
+18:53:15, 193, 10, 178, congested, Overuse
+18:53:15, 193, 10, 207, congested, Overuse
+18:53:15, 177, 10, 206, congested, Overuse
+18:53:16, 177, 10, 177, congested, Overuse
+18:53:16, 173, 10, 255, congested, Overuse
+18:53:16, 173, 10, 162, congested, Overuse
+18:53:16, 173, 10, 87, congested, Overuse
+18:53:16, 233, 11, 309, congested, Overuse
+18:53:16, 187, 11, 308, congested, Overuse
+18:53:16, 187, 11, 127, congested, Overuse
+18:53:16, 191, 11, 15, congested, Overuse
+18:53:16, 191, 11, 85, steady, Normal
+18:53:16, 175, 11, 108, steady, Normal
+18:53:17, 175, 11, 124, steady, Normal
+18:53:17, 189, 11, 92, steady, Normal
+18:53:17, 189, 11, 189, steady, Normal
+18:53:17, 179, 11, 302, steady, Normal
+18:53:17, 179, 10, 272, steady, Normal
+18:53:17, 179, 10, 98, steady, Normal
+18:53:17, 179, 10, 0, steady, Normal
+18:53:17, 304, 10, 350, steady, Normal
+18:53:17, 304, 10, 173, steady, Normal
+18:53:17, 312, 10, 622, steady, Normal
+18:53:18, 312, 10, 0, steady, Normal
+18:53:18, 313, 10, 588, steady, Normal
+18:53:18, 225, 10, 322, steady, Normal
+18:53:18, 225, 10, 172, steady, Normal
+18:53:18, 206, 10, 277, steady, Normal
+18:53:18, 206, 10, 95, steady, Normal
+18:53:18, 251, 10, 189, congested, Overuse
+18:53:18, 251, 10, 164, congested, Overuse
+18:53:18, 251, 10, 149, congested, Overuse
+18:53:18, 310, 10, 509, congested, Overuse
+18:53:19, 310, 10, 0, congested, Overuse
+18:53:19, 317, 10, 443, congested, Overuse
+18:53:19, 317, 10, 181, congested, Overuse
+18:53:19, 317, 10, 236, congested, Overuse
+18:53:19, 410, 10, 564, congested, Overuse
+18:53:19, 337, 16, 174, congested, Overuse
+18:53:19, 265, 16, 262, congested, Overuse
+18:53:19, 265, 16, 75, congested, Overuse
+18:53:19, 286, 16, 442, congested, Overuse
+18:53:19, 286, 16, 203, congested, Overuse
+18:53:20, 211, 16, 146, congested, Overuse
+18:53:20, 211, 16, 276, congested, Overuse
+18:53:20, 270, 16, 291, congested, Overuse
+18:53:20, 176, 16, 208, congested, Overuse
+18:53:20, 176, 16, 226, congested, Overuse
+18:53:20, 176, 15, 87, congested, Overuse
+18:53:20, 257, 15, 264, congested, Overuse
+18:53:20, 257, 15, 219, congested, Overuse
+18:53:20, 242, 15, 166, congested, Overuse
+18:53:20, 242, 15, 233, congested, Overuse
+18:53:21, 242, 15, 244, congested, Overuse
+18:53:21, 316, 15, 253, congested, Overuse
+18:53:21, 286, 15, 174, congested, Overuse
+18:53:21, 286, 15, 181, congested, Overuse
+18:53:21, 286, 15, 0, congested, Overuse
+18:53:21, 362, 15, 334, congested, Overuse
+18:53:21, 362, 15, 182, congested, Overuse
+18:53:21, 383, 15, 177, steady, Normal
+18:53:21, 260, 15, 615, steady, Normal
+18:53:21, 260, 15, 256, steady, Normal
+18:53:22, 210, 15, 177, steady, Normal
+18:53:22, 210, 15, 363, steady, Normal
+18:53:22, 210, 15, 76, steady, Normal
+18:53:22, 385, 15, 458, steady, Normal
+18:53:22, 246, 15, 177, steady, Normal
+18:53:22, 246, 11, 95, steady, Normal
+18:53:22, 285, 11, 458, steady, Normal
+18:53:22, 191, 11, 278, steady, Normal
+18:53:22, 191, 11, 96, steady, Normal
+18:53:22, 202, 11, 89, steady, Normal
+18:53:23, 202, 11, 20, steady, Normal
+18:53:23, 202, 11, 87, steady, Normal
+18:53:23, 246, 11, 90, steady, Normal
+18:53:23, 204, 11, 91, steady, Normal
+18:53:23, 204, 11, 96, steady, Normal
+18:53:23, 178, 11, 7, steady, Normal
+18:53:23, 178, 11, 103, steady, Normal
+18:53:23, 172, 11, 85, steady, Normal
+18:53:23, 172, 11, 32, steady, Normal
+18:53:23, 184, 11, 175, steady, Normal
+18:53:24, 184, 11, 47, steady, Normal
+18:53:24, 184, 11, 87, steady, Normal
+18:53:24, 264, 11, 4, steady, Normal
+18:53:24, 186, 11, 244, steady, Normal
+18:53:24, 186, 11, 144, steady, Normal
+18:53:24, 195, 11, 8, steady, Normal
+18:53:24, 195, 10, 146, steady, Normal
+18:53:24, 181, 10, 81, steady, Normal
+18:53:24, 181, 10, 148, steady, Normal
+18:53:24, 187, 10, 7, steady, Normal
+18:53:25, 187, 10, 127, steady, Normal
+18:53:25, 172, 10, 91, steady, Normal
+18:53:25, 172, 10, 123, steady, Normal
+18:53:25, 184, 10, 137, steady, Normal
+18:53:25, 184, 10, 0, steady, Normal
+18:53:25, 172, 10, 92, steady, Normal
+18:53:25, 172, 10, 84, steady, Normal
+18:53:25, 191, 10, 121, steady, Normal
+18:53:25, 191, 10, 0, steady, Normal
+18:53:25, 191, 10, 87, steady, Normal
+18:53:26, 198, 10, 82, steady, Normal
+18:53:26, 199, 10, 106, steady, Normal
+18:53:26, 199, 10, 84, steady, Normal
+18:53:26, 173, 10, 26, steady, Normal
+18:53:26, 173, 10, 106, steady, Normal
+18:53:26, 173, 10, 40, steady, Normal
+18:53:26, 235, 13, 153, steady, Normal
+18:53:26, 235, 13, 84, steady, Normal
+18:53:26, 230, 13, 324, steady, Normal
+18:53:26, 181, 13, 195, steady, Normal
+18:53:27, 181, 13, 220, steady, Normal
+18:53:27, 181, 13, 122, steady, Normal
+18:53:27, 238, 13, 234, steady, Normal
+18:53:27, 197, 13, 264, steady, Normal
+18:53:27, 197, 13, 178, steady, Normal
+18:53:27, 192, 13, 272, steady, Normal
+18:53:27, 192, 15, 224, steady, Normal
+18:53:27, 192, 15, 150, steady, Normal
+18:53:27, 196, 15, 216, steady, Normal
+18:53:27, 196, 15, 252, steady, Normal
+18:53:28, 213, 15, 152, steady, Normal
+18:53:28, 213, 15, 190, steady, Normal
+18:53:28, 231, 15, 242, steady, Normal
+18:53:28, 189, 15, 212, steady, Normal
+18:53:28, 189, 15, 240, steady, Normal
+18:53:28, 189, 15, 170, steady, Normal
+18:53:28, 208, 16, 208, steady, Normal
+18:53:28, 208, 16, 84, steady, Normal
+18:53:28, 223, 16, 264, steady, Normal
+18:53:28, 223, 16, 84, steady, Normal
+18:53:29, 223, 16, 323, steady, Normal
+18:53:29, 223, 16, 0, steady, Normal
+18:53:29, 248, 16, 486, steady, Normal
+18:53:29, 248, 16, 84, steady, Normal
+18:53:29, 267, 16, 402, steady, Normal
+18:53:29, 267, 16, 185, steady, Normal
+18:53:29, 219, 15, 193, steady, Normal
+18:53:29, 190, 15, 99, steady, Normal
+18:53:29, 190, 15, 93, steady, Normal
+18:53:29, 184, 15, 23, steady, Normal
+18:53:30, 184, 15, 106, steady, Normal
+18:53:30, 189, 15, 145, steady, Normal
+18:53:30, 189, 15, 164, steady, Normal
+18:53:30, 189, 15, 250, steady, Normal
+18:53:30, 189, 15, 0, steady, Normal
+18:53:30, 330, 15, 234, steady, Normal
+18:53:30, 330, 15, 0, steady, Normal
+18:53:30, 332, 21, 376, steady, Normal
