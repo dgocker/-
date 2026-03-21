@@ -660,7 +660,9 @@ export class AdaptiveH264Engine {
       if (this.sendQueue.length > 150) {
         if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Dropping all and forcing Keyframe!`);
         this.sendQueue = []; // Очищаем полностью, никаких огрызков
-        this.needsKeyframe = true; // Заставляем энкодер собрать картинку с нуля
+        if (now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
+          this.needsKeyframe = true; // Заставляем энкодер собрать картинку с нуля
+        }
       }
 
       const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
@@ -673,7 +675,11 @@ export class AdaptiveH264Engine {
         this.droppedFrames++;
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
-        if (this.droppedFramesConsecutive >= 3) this.needsKeyframe = true;
+        
+        // FIX: Only request keyframe if NOT in cooldown
+        if (this.droppedFramesConsecutive >= 3 && now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
+          this.needsKeyframe = true;
+        }
 
         if ((isInternalQueuePanic || bufferedAmount > maxWsBuffer * 1.5) && now - this.lastCongestionTs > this.congestionCooldown) {
           if (this.onLog) {

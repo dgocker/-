@@ -41,6 +41,8 @@ export class H264Decoder {
   private jitterLog: number[] = [];
   private lastReceiveTime = 0;
   private lastSenderTs = 0;
+  private lastKeyframeRequestTs = 0;
+  private readonly KEYFRAME_REQUEST_COOLDOWN = 2000;
 
   constructor(canvas: HTMLCanvasElement, onLog?: (msg: string) => void, onRequestKeyframe?: (isPanic: boolean) => void) {
     this.canvas = canvas;
@@ -126,7 +128,11 @@ export class H264Decoder {
 
     // Automatic Keyframe Request: Если ждем I-Frame, но получаем дельту — просим ключевой кадр.
     if (this.firstSenderTs === -1 && type === 'delta' && frameId % 30 === 0) {
-      if (this.onRequestKeyframe) this.onRequestKeyframe(false);
+      const now = performance.now();
+      if (this.onRequestKeyframe && now - this.lastKeyframeRequestTs > this.KEYFRAME_REQUEST_COOLDOWN) {
+        this.lastKeyframeRequestTs = now;
+        this.onRequestKeyframe(false);
+      }
     }
 
     if (type === 'key' && this.onLog) {
@@ -229,7 +235,12 @@ export class H264Decoder {
         if (this.onLog) this.onLog(`\u23E9 Panic Reset: NO KEYFRAME IN BUFFER. Dropping all ${this.jitterBuffer.length} frames.`);
         this.jitterBuffer = [];
         this.firstSenderTs = -1;
-        if (this.onRequestKeyframe) this.onRequestKeyframe(true);
+        
+        const pn = performance.now();
+        if (this.onRequestKeyframe && pn - this.lastKeyframeRequestTs > this.KEYFRAME_REQUEST_COOLDOWN) {
+          this.lastKeyframeRequestTs = pn;
+          this.onRequestKeyframe(true);
+        }
         return;
       }
     }

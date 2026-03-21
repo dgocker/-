@@ -100,6 +100,12 @@ export function useSecureRelayCall(
     }
     if (msg.type === 'requestKeyframe') {
       if (adaptiveEngineRef.current) {
+        // FIX: Add a local debounce/cooldown to prevent processing too many requests
+        const now = performance.now();
+        if ((adaptiveEngineRef.current as any)._lastRemoteRequestTs && now - (adaptiveEngineRef.current as any)._lastRemoteRequestTs < 2000) {
+          return;
+        }
+        (adaptiveEngineRef.current as any)._lastRemoteRequestTs = now;
         adaptiveEngineRef.current.forceKeyframe();
         addLog('🚀 Remote requested keyframe via Socket.io, forcing now');
       }
