@@ -60,6 +60,59 @@ export function useSecureRelayCall(
   const isCleanedUpRef = useRef(false);
   const orientationListenerRef = useRef<(() => void) | null>(null);
 
+  // === НОВЫЙ БЛОК: Слушатель команд управления через Socket.io ===
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleMediaControl = (data: any) => {
+      const { payload } = data;
+      const msg = payload;
+
+      if (msg.type === 'ping') {
+        socket.emit('media_control', { 
+          roomId: currentRoomIdRef.current, 
+          payload: { type: 'pong', ts: msg.ts, sid: msg.sid } 
+        });
+        return;
+      }
+      if (msg.type === 'pong') {
+        if (msg.sid !== mySidRef.current) return;
+        const rtt = Math.max(0, performance.now() - msg.ts);
+        rttRef.current = rtt;
+        setStats(prev => ({ ...prev, rtt }));
+        if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
+        (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
+        return;
+      }
+      if (msg.type === 'rotation') {
+        const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
+        if (firstDecoder) {
+          firstDecoder.setRotation(msg.value || msg.rotation); // Поддержка обоих форматов
+          if (msg.mirror !== undefined) firstDecoder.setMirror(msg.mirror);
+        }
+        return;
+      }
+      if (msg.type === 'requestKeyframe') {
+        if (adaptiveEngineRef.current) {
+          adaptiveEngineRef.current.forceKeyframe();
+          addLog('🚀 Remote requested keyframe via Socket.io, forcing now');
+        }
+        return;
+      }
+      if (msg.type === 'backpressure') {
+        if (adaptiveEngineRef.current) {
+          adaptiveEngineRef.current.triggerBackpressure(msg.rb);
+        }
+        return;
+      }
+    };
+
+    socket.on('media_control', handleMediaControl);
+    return () => {
+      socket.off('media_control', handleMediaControl);
+    };
+  }, [socket, addLog]);
+
 
   const startPing = (ws: WebSocket) => {
     if (pingIntervalRef.current) window.clearInterval(pingIntervalRef.current);
@@ -69,7 +122,10 @@ export function useSecureRelayCall(
       if (ws.readyState === WebSocket.OPEN) {
         pingCounter++;
         if (pingCounter >= 2) { // Every 200ms (2 * 100ms) - Task 28
-          ws.send(JSON.stringify({ type: 'ping', ts: performance.now(), sid: mySidRef.current }));
+          socket?.emit('media_control', { 
+            roomId: currentRoomIdRef.current, 
+            payload: { type: 'ping', ts: performance.now(), sid: mySidRef.current } 
+          });
           pingCounter = 0;
         }
       }
@@ -597,7 +653,7 @@ export function useSecureRelayCall(
     addLog(`🔗 Connecting to Secure Relay room: ${roomId}`);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/secure-relay?room=${roomId}&token=${roomToken}${loopback ? '&loopback=true' : ''}`;
+    const wsUrl = `${protocol}//${host}/secure-relay?room=${roomId}&token=${roomToken}${loopback ? '&loopback=true' : ''}${socket?.id ? `&sid=${socket.id}` : ''}`;
 
     addLog(`📡 WebSocket URL: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
@@ -614,7 +670,10 @@ export function useSecureRelayCall(
 
       // Send initial orientation (Confirmed by Audit 1, 3)
       const initialRotation = window.orientation || (window.screen as any).orientation?.angle || 0;
-      ws.send(JSON.stringify({ type: 'rotation', rotation: initialRotation, sid: mySidRef.current }));
+      socket?.emit('media_control', { 
+        roomId: currentRoomIdRef.current, 
+        payload: { type: 'rotation', rotation: initialRotation, sid: mySidRef.current } 
+      });
 
       // Force a fresh I-frame on reconnect to prevent artifacts
       if (adaptiveEngineRef.current) {
@@ -624,7 +683,10 @@ export function useSecureRelayCall(
       // Send OS info to help receiver correct orientation (Android fix)
       const isAndroid = /Android/i.test(navigator.userAgent);
       if (isAndroid) {
-        ws.send(JSON.stringify({ type: 'info', os: 'android', sid: mySidRef.current }));
+        socket?.emit('media_control', { 
+          roomId: currentRoomIdRef.current, 
+          payload: { type: 'info', os: 'android', sid: mySidRef.current } 
+        });
         addLog('📱 Signaling: I am on Android (sender)');
       }
 
@@ -755,52 +817,8 @@ export function useSecureRelayCall(
 
     ws.onmessage = async (event: MessageEvent) => {
       if (typeof event.data === 'string') {
-        bytesReceivedRef.current += event.data.length;
-        try {
-          const trimmed = event.data.trim();
-          if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return;
-          const msg = JSON.parse(trimmed);
-
-          if (msg.type === 'ping') {
-            // Phase 2: End-to-end RTT. Client responds to ping.
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
-            }
-            return;
-          }
-          if (msg.type === 'pong') {
-            if (msg.sid !== mySidRef.current) return;
-            const rtt = Math.max(0, performance.now() - msg.ts);
-            rttRef.current = rtt;
-            setStats(prev => ({ ...prev, rtt }));
-            if (adaptiveEngineRef.current) adaptiveEngineRef.current.updateRTT(rtt);
-            (Object.values(h264DecodersRef.current) as H264Decoder[]).forEach(d => d.updateRTT(rtt));
-            return;
-          }
-          if (msg.type === 'rotation') {
-            const firstDecoder = Object.values(h264DecodersRef.current)[0] as H264Decoder | undefined;
-            if (firstDecoder) {
-              firstDecoder.setRotation(msg.value);
-              if (msg.mirror !== undefined) {
-                firstDecoder.setMirror(msg.mirror);
-              }
-            }
-            return;
-          }
-          if (msg.type === 'requestKeyframe') {
-            if (adaptiveEngineRef.current) {
-              adaptiveEngineRef.current.forceKeyframe();
-              addLog('🚀 Remote requested keyframe, forcing now');
-            }
-            return;
-          }
-          if (msg.type === 'backpressure') {
-            if (adaptiveEngineRef.current) {
-              adaptiveEngineRef.current.triggerBackpressure(msg.rb);
-            }
-            return;
-          }
-        } catch (e) { }
+        // WebSocket is now 100% binary. Strings are ignored as they should go through Socket.io.
+        return;
       } else if (event.data instanceof ArrayBuffer) {
         const view = new Uint8Array(event.data);
         const senderIdLength = view[0];
@@ -852,10 +870,11 @@ export function useSecureRelayCall(
 
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe', senderId }));
-                    if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
-                  }
+                  socket?.emit('media_control', { 
+                    roomId: currentRoomIdRef.current, 
+                    payload: { type: 'requestKeyframe', senderId } 
+                  });
+                  if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                 });
                 h264DecodersRef.current[senderId].setRotation(remoteRotation);
                 h264DecodersRef.current[senderId].setMirror(remoteMirror);
@@ -923,10 +942,11 @@ export function useSecureRelayCall(
               }
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'requestKeyframe', senderId }));
-                    if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
-                  }
+                  socket?.emit('media_control', { 
+                    roomId: currentRoomIdRef.current, 
+                    payload: { type: 'requestKeyframe', senderId } 
+                  });
+                  if (isPanic) addLog(`📡 PANIC: Requested keyframe from ${senderId}`);
                 });
                 h264DecodersRef.current[senderId].setRotation(remoteRotation);
                 h264DecodersRef.current[senderId].setMirror(remoteMirror);
@@ -1000,9 +1020,10 @@ export function useSecureRelayCall(
   useEffect(() => {
     const handleOrientationChange = () => {
       const angle = window.orientation || (window.screen as any).orientation?.angle || 0;
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'rotation', rotation: angle, sid: mySidRef.current }));
-      }
+      socket?.emit('media_control', { 
+        roomId: currentRoomIdRef.current, 
+        payload: { type: 'rotation', rotation: angle, sid: mySidRef.current } 
+      });
     };
     window.addEventListener('orientationchange', handleOrientationChange);
     return () => window.removeEventListener('orientationchange', handleOrientationChange);

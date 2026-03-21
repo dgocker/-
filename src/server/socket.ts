@@ -142,6 +142,18 @@ export function setupSocket(io: Server) {
       }
     });
 
+    // === НОВЫЙ БЛОК ДЛЯ МЕДИА-КОНТРОЛЯ ===
+    socket.on('media_control', (data) => {
+      const { roomId, payload } = data;
+      // Пересылаем служебные команды (ping, pong, requestKeyframe, rotation) всем остальным в комнате
+      if (roomId) {
+        socket.to(roomId).emit('media_control', { 
+          fromSocketId: socket.id, 
+          payload 
+        });
+      }
+    });
+
     socket.on('rotation', (data) => {
        const { roomId, angle } = data;
        if (roomId) {

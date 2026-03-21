@@ -67,6 +67,7 @@ async function startServer() {
     const roomId = urlParams.get('room');
     const senderId = Math.random().toString(36).substring(7);
     (ws as any).id = senderId;
+    (ws as any).socketId = urlParams.get('sid'); // FIX: Store Socket.io ID for control channel
 
     // Optimization: Let the OS handle socket buffers for better throughput on high-bandwidth links.
     // Manual limits (64KB) were causing protocol-level bottlenecks (~10Mbps cap).
@@ -117,22 +118,29 @@ async function startServer() {
         roomClients.forEach((client) => {
           if ((client !== ws || isLoopback) && client.readyState === WebSocket.OPEN) {
             // BACKPRESSURE SIGNAL (Phase 2): Notify sender if receiver's buffer is growing
+            // FIX: Moved to Socket.io for 100% stream purity
             if (isBinary && client.bufferedAmount > 131072) { // 128KB threshold
-              try {
-                ws.send(JSON.stringify({ 
-                  type: 'backpressure', 
-                  rb: client.bufferedAmount,
-                  target: (client as any).id 
-                }));
-              } catch (e) {}
+              const senderSid = (ws as any).socketId;
+              if (senderSid) {
+                io.to(senderSid).emit('media_control', {
+                  payload: { 
+                    type: 'backpressure', 
+                    rb: client.bufferedAmount,
+                    target: (client as any).id 
+                  }
+                });
+              }
             }
 
             // Safety drop for extreme congestion
             const MAX_BUFFER = 5242880; // 5 MB
             if (isBinary && client.bufferedAmount > MAX_BUFFER) {
-              try {
-                ws.send(JSON.stringify({ type: 'requestKeyframe', target: (client as any).id, reason: 'server_buffer_drop' }));
-              } catch(e) {}
+              const senderSid = (ws as any).socketId;
+              if (senderSid) {
+                io.to(senderSid).emit('media_control', {
+                  payload: { type: 'requestKeyframe', target: (client as any).id, reason: 'server_buffer_drop' }
+                });
+              }
               return;
             }
 
