@@ -200,6 +200,13 @@ export class AdaptiveH264Engine {
   }
 
   private initEncoder() {
+    if (this.encoder) {
+      try {
+        this.encoder.close();
+      } catch (e) {
+        // Ignore close errors
+      }
+    }
     try {
       this.encoder = new VideoEncoder({
         output: (chunk, metadata) => {
@@ -267,9 +274,8 @@ export class AdaptiveH264Engine {
   }
 
   private handleEncoderError() {
-    if (this.isRecovering || this.errorCount > 3) return;
+    if (this.isRecovering) return;
     this.isRecovering = true;
-    this.errorCount++;
     this.pendingFrames = 0;
 
     setTimeout(async () => {
@@ -278,7 +284,9 @@ export class AdaptiveH264Engine {
         this.isConfigured = false;
         this.initEncoder();
         this.isRecovering = false;
-      } catch (err) { }
+      } catch (err) {
+        this.isRecovering = false;
+      }
     }, 1000);
   }
 
