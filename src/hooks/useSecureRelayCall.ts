@@ -68,7 +68,7 @@ export function useSecureRelayCall(
       const buffered = ws.bufferedAmount || 0;
       if (ws.readyState === WebSocket.OPEN) {
         pingCounter++;
-        if (pingCounter >= 5) { // Every 500ms (5 * 100ms)
+        if (pingCounter >= 2) { // Every 200ms (2 * 100ms) - Task 28
           ws.send(JSON.stringify({ type: 'ping', ts: performance.now(), sid: mySidRef.current }));
           pingCounter = 0;
         }
@@ -762,9 +762,7 @@ export function useSecureRelayCall(
           const msg = JSON.parse(trimmed);
 
           if (msg.type === 'ping') {
-            if (msg.sid !== mySidRef.current) {
-              ws.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
-            }
+            // Server should handle this now. Just log if needed.
             return;
           }
           if (msg.type === 'pong') {

@@ -300,7 +300,9 @@ export class AdaptiveH264Engine {
         codec: "avc1.42e01f", // Attempt 4: Baseline Profile
         width: width,
         height: height,
-        bitrate: this.targetBitrate,
+        // FIX: Hardware safety (Task 29). Some Androids hang if bitrate is too low.
+        // Set configuration floor to 150k; Pacer will still limit output to minBitrate.
+        bitrate: Math.max(150000, this.targetBitrate),
         bitrateMode: 'variable',
         latencyMode: "realtime",
         // @ts-ignore
@@ -343,19 +345,19 @@ export class AdaptiveH264Engine {
       this.currentScale = 0.4;
     } else if (kbps < 700) {
       this.currentFps = 15;
-      this.currentScale = 0.6;
-    } else if (kbps < 1200) {
+      this.currentScale = 0.5; // Сделаем шаги четче
+    } else if (kbps < 1500) {
       this.currentFps = 24;
-      this.currentScale = 0.8;
+      this.currentScale = 0.75;
     } else {
       this.currentFps = 30;
-      this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
+      this.currentScale = 1.0;
     }
 
-    // Применяем настройки только если битрейт изменился значимо (30%)
+    // Применяем настройки только если битрейт изменился значимо (40%) или масштаб изменился
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
-
-    if (diffRatio >= 0.3 || !this.isConfigured) {
+    
+    if (diffRatio >= 0.4 || !this.isConfigured) {
       this.lastConfiguredBitrate = this.targetBitrate;
       this.lastConfiguredTs = now;
       this.isConfigured = false;

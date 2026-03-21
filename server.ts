@@ -97,6 +97,22 @@ async function startServer() {
     const isLoopback = urlParams.get('loopback') === 'true';
 
     ws.on('message', (message, isBinary) => {
+      // FIX: Server-Side RTT (Iteration 9)
+      // If message is a string and contains "type":"ping", respond immediately.
+      // This prevents remote client lag from affecting local bitrate.
+      if (!isBinary) {
+        try {
+          const text = message.toString();
+          if (text.includes('"type":"ping"')) {
+            const msg = JSON.parse(text);
+            ws.send(JSON.stringify({ type: 'pong', ts: msg.ts, sid: msg.sid }));
+            return; // DO NOT relay ping to other clients!
+          }
+        } catch (e) {
+          // Fall through to relay logic for non-json or error cases
+        }
+      }
+
       const roomClients = rooms.get(roomId);
       if (roomClients) {
         let relayedMessage = message;
