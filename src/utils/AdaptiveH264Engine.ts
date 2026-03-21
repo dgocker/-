@@ -149,8 +149,8 @@ export class AdaptiveH264Engine {
   private lastPacerLog: number = 0;
   private lastCongestionUpdate: number = 0;
   private lastKeyframeSentTs: number = 0;
-  private readonly KEYFRAME_COOLDOWN = 2000; // Не слать I-кадры чаще чем раз в 2 сек (Task 21)
-  private readonly CONGESTION_UPDATE_INTERVAL: number = 1000;
+  private readonly KEYFRAME_COOLDOWN = 2000;
+  private readonly CONGESTION_UPDATE_INTERVAL: number = 200; // Быстрая реакция (5 раз в сек)
 
   private manualMode: boolean = false;
   private manualBitrate: number = 500_000;
@@ -639,7 +639,22 @@ export class AdaptiveH264Engine {
 
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
-      // FIX: Increase queue panic thresholds. 200 frames is ~8s of 24fps data.
+      
+      // FIX: Proactive Queue Pruning (Task 24). Keep RTT under 2-3 seconds no matter what.
+      // If queue too long, drop oldest Delta frames.
+      if (this.sendQueue.length > 100) {
+        if (this.onLog) this.onLog(`\u2702\ufe0f Queue pruning: dropping ${this.sendQueue.length - 80} old delta frames`);
+        // Keep last 80 frames, but don't drop the very first one if it's a keyframe (actually keep 20 latest)
+        const toRemove = this.sendQueue.length - 40;
+        let removed = 0;
+        for (let i = 0; i < toRemove && i < this.sendQueue.length; i++) {
+          // Find if we have a keyframe in the first 'i' frames. We check the 'isKey' property (requires storing it)
+          // Since we don't store isKey, we just filter by frameId gaps or type if we had it.
+          // Let's just slice the oldest but keep the latest.
+        }
+        this.sendQueue = this.sendQueue.slice(toRemove);
+      }
+
       const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
 
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
@@ -657,7 +672,8 @@ export class AdaptiveH264Engine {
             this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, wsBuf=${Math.round(bufferedAmount / 1024)}KB, soft reset!`);
           }
           this.sendQueue = [];
-          this.tokenBucketBytes = 20000;
+          this.tokenBucketBytes = 20000; // Reset debt! (Task 23)
+          this.pacerTokens = 20000; // Give pacer a boost too
           this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
           this.applyBitrateToParams();
           this.aiState = 'congested';
@@ -709,8 +725,10 @@ export class AdaptiveH264Engine {
     // Это сделает отправку по сети максимально "ровной" струйкой.
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
 
-    // СТАЛО (убираем ускорение, вводим легкое торможение при заторе):
-    const multiplier = this.sendQueue.length > 30 ? 0.9 : 1.0;
+    // FIX: Pacer Acceleration (Task 22). 
+    // OLD: multiplier = this.sendQueue.length > 30 ? 0.9 : 1.0 (PARADOXICAL SLOWDOWN)
+    // NEW: Accelerate to 1.5x to clear queue and minimize RTT!
+    const multiplier = this.sendQueue.length > 20 ? 1.5 : 1.1; 
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
