@@ -316,10 +316,10 @@ export class AdaptiveH264Engine {
   private applyBitrateToParams() {
     if (!this.encoder || !this.isConfigured) return;
 
-    // ИСПРАВЛЕНИЕ 1: Запрещаем менять разрешение и битрейт чаще, чем раз в 3.5 секунды.
-    // Это спасет от "шторма" ключевых кадров!
+    // FIX: I-Frame Storm Mitigation. Enforce 10s cooldown between configurations!
+    // Changing resolutions forces huge I-Frames, which destroy ultra-low bitrate networks.
     const now = performance.now();
-    if (now - this.lastConfiguredTs < 3500) return; 
+    if (now - this.lastConfiguredTs < 10000) return; 
 
     const kbps = this.targetBitrate / 1024;
     
@@ -341,25 +341,16 @@ export class AdaptiveH264Engine {
       this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
     }
 
-    // Применяем настройки только если битрейт изменился более чем на 15% (было 5%)
+    // Применяем настройки только если битрейт изменился значимо
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
-    if (diffRatio >= 0.15) {
-      try {
-        this.encoder.configure({
-          codec: "avc1.42e01f",
-          width: this.currentWidth, 
-          height: this.currentHeight,
-          bitrate: this.targetBitrate,
-          bitrateMode: 'variable',
-          latencyMode: "realtime",
-          // @ts-ignore
-          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 } 
-        });
-        this.lastConfiguredBitrate = this.targetBitrate;
-        
-        // Запоминаем время успешной конфигурации
-        this.lastConfiguredTs = now; 
-      } catch (e) { }
+    
+    // FIX: Only trigger reconfiguration flag here to prevent double-configuration and I-Frame storm.
+    // The actual configure is safely done in processFrame(), which prevents the recursive storm.
+    if (diffRatio >= 0.25 || (this.targetBitrate < 100000 && diffRatio >= 0.15)) {
+      this.lastConfiguredBitrate = this.targetBitrate;
+      this.lastConfiguredTs = now; 
+      
+      this.isConfigured = false; 
     }
   }
 

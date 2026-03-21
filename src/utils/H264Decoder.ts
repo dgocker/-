@@ -159,7 +159,8 @@ export class H264Decoder {
     this.jitterBuffer.push(packet);
     this.jitterBuffer.sort((a, b) => a.frameId - b.frameId);
 
-    if (!this.isPlaying && this.jitterBuffer.length >= 3) {
+    // FIX: VFR Support (start on 1 frame, don't wait for 3 because at 5fps 3 frames takes 600ms!)
+    if (!this.isPlaying && this.jitterBuffer.length >= 1) {
       this.isPlaying = true;
       
       // ✅ КРИТИЧЕСКИ ВАЖНО: Восстановление после микро-разрывов (gap > 3s)
@@ -186,7 +187,9 @@ export class H264Decoder {
     if (this.jitterBuffer.length === 0) {
       if (this.isPlaying) {
         this.isPlaying = false;
-        if (this.onLog) this.onLog(`\u26A0\uFE0F Buffer empty, stopping playback`);
+        // FIX: Muted warning because dropping to 0 buffer is perfectly normal 
+        // behavior when running at Variable Frame Rate (e.g. 5fps).
+        // if (this.onLog) this.onLog(`\u26A0\uFE0F Buffer empty, stopping playback`);
         this.lastBufferEmptyTime = now;
       }
       return; // Выходим молча, pushPacket сам вызовет requestAnimationFrame, когда придут данные
