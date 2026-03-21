@@ -326,41 +326,39 @@ export class AdaptiveH264Engine {
   private applyBitrateToParams() {
     if (!this.encoder || !this.isConfigured) return;
 
-    // FIX: I-Frame Storm Mitigation. Enforce 10s cooldown between configurations!
-    // Changing resolutions forces huge I-Frames, which destroy ultra-low bitrate networks.
+    // FIX: I-Frame Storm & Encoder Hang Mitigation (Task 25).
+    // Changing resolutions forces huge I-Frames and can hang Android hardware.
+    // Enforce 2s cooldown for any re-configuration.
     const now = performance.now();
-    if (now - this.lastConfiguredTs < 10000) return; 
+    if (now - this.lastConfiguredTs < 2000) return;
 
     const kbps = this.targetBitrate / 1024;
-    
+
     // Динамическое понижение FPS и разрешения при экстремальном падении
-    if (kbps < 100) {
-      this.currentFps = 5; // Слайдшоу для выживания
-      this.currentScale = 0.2; // Сильное мыло, но сеть не упадет
+    if (kbps < 120) {
+      this.currentFps = 5;
+      this.currentScale = 0.2;
     } else if (kbps < 300) {
       this.currentFps = 10;
-      this.currentScale = 0.3;
-    } else if (kbps < 600) {
+      this.currentScale = 0.4;
+    } else if (kbps < 700) {
       this.currentFps = 15;
-      this.currentScale = 0.5;
+      this.currentScale = 0.6;
     } else if (kbps < 1200) {
       this.currentFps = 24;
-      this.currentScale = 0.75;
+      this.currentScale = 0.8;
     } else {
       this.currentFps = 30;
       this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
     }
 
-    // Применяем настройки только если битрейт изменился значимо
+    // Применяем настройки только если битрейт изменился значимо (30%)
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
-    
-    // FIX: Only trigger reconfiguration flag here to prevent double-configuration and I-Frame storm.
-    // The actual configure is safely done in processFrame(), which prevents the recursive storm.
-    if (diffRatio >= 0.25 || (this.targetBitrate < 100000 && diffRatio >= 0.15)) {
+
+    if (diffRatio >= 0.3 || !this.isConfigured) {
       this.lastConfiguredBitrate = this.targetBitrate;
-      this.lastConfiguredTs = now; 
-      
-      this.isConfigured = false; 
+      this.lastConfiguredTs = now;
+      this.isConfigured = false;
     }
   }
 
@@ -394,37 +392,36 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
-
-    // Четкое условие перегрузки: доверяем RTT
-    const isOveruse = this.delayTrend > 20 || isBufferGrowing || this.lastSmoothedRtt > 600;
+    // СТРОГИЙ ПОТОЛОК (Task 26): Если RTT > 600, мы В ПРИНЦИПЕ не можем расти.
+    const isHighRtt = this.lastSmoothedRtt > 600;
+    const isOveruse = this.delayTrend > 20 || isBufferGrowing || isHighRtt;
 
     if (isOveruse) {
-      if (this.aiState !== 'congested' || now - this.lastCongestionTs > 1000) {
+      // Кулдаун снижения в 200мс (совпадает с интервалом обновления)
+      if (this.aiState !== 'congested' || now - this.lastCongestionTs > 200) {
         this.aiState = 'congested';
-        // Multiplicative Decrease: Жестко рубим
-        const cutFactor = this.lastSmoothedRtt > 1000 ? 0.6 : 0.8;
+        // Если пинг зашкаливает (>1.5с), рубим до пола сразу!
+        let cutFactor = 0.8;
+        if (this.lastSmoothedRtt > 1500) cutFactor = 0.5;
+        if (this.lastSmoothedRtt > 3000) cutFactor = 0.2;
+
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
         stateChanged = true;
       }
     } else {
-      // Состояния recovery больше нет! Ждем 1.5 сек после пробки и переходим в steady
-      if (this.aiState === 'congested' && now - this.lastCongestionTs > 1500) {
+      // Выход из пробки только если пинг упал ниже 400 и прошло 1.5 секунды
+      if (this.aiState === 'congested' && now - this.lastCongestionTs > 1500 && this.lastSmoothedRtt < 400) {
         this.aiState = 'steady';
         stateChanged = true;
       }
 
-      if (this.aiState === 'steady') {
-        if (now - this.lastSteadyIncrease > 500) {
-          // Additive Increase: Линейный рост по 5-15 кбит/с (НЕ умножение)
-          const growth = this.lastSmoothedRtt < 150 ? 15000 : 5000;
+      if (this.aiState === 'steady' && this.lastSmoothedRtt < 500) {
+        if (now - this.lastSteadyIncrease > 400) {
+          // Additive Increase: Очень медленно
+          const growth = this.lastSmoothedRtt < 150 ? 20000 : 8000;
           this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + growth);
           this.lastSteadyIncrease = now;
-        }
-
-        if (!this.isProbing && now - this.probingStartTs > 12000) {
-          this.isProbing = true;
-          this.probingStartTs = now;
         }
 
         if (this.isProbing) {
@@ -448,13 +445,16 @@ export class AdaptiveH264Engine {
     this.lastRtt = rtt;
 
     // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс (для мобилок это край), режем битрейт.
-    if (rtt > 1200 && now - this.lastCongestionTs > 1000) {
-      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
-      // FIX: DO NOT clear sendQueue here! Clearing queue loses I-frames, inducing requestKeyframe storms.
+    if (rtt > 1200 && now - this.lastCongestionTs > 500) {
+      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
+      // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, очищая токены
+      this.pacerTokens = -50000; 
+      this.tokenBucketBytes = 40000; // Reset debt to allow restart! (Task 27)
+
       this.applyBitrateToParams();
       this.aiState = 'congested';
       this.lastCongestionTs = now;
-      if (this.onLog) this.onLog(`🚨 RTT Panic (${Math.round(rtt)}ms): Halving bitrate to ${Math.round(this.targetBitrate / 1024)}k`);
+      if (this.onLog) this.onLog(`🚨 RTT Panic (${Math.round(rtt)}ms): Dropping to ${Math.round(this.targetBitrate / 1024)}k and pausing Pacer`);
     }
 
     this.rttHistory.push(Math.max(20, rtt));
@@ -545,7 +545,7 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
     this.lastCongestionTs = 0;
     this.aiState = 'steady';
-    this.targetBitrate = 600_000;
+    this.targetBitrate = 400_000; // Safer start
     this.frameId = 0;
     this.applyBitrateToParams();
     if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
