@@ -402,18 +402,17 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
-    // СТРОГИЙ ПОТОЛОК (Task 26): Если RTT > 600, мы В ПРИНЦИПЕ не можем расти.
-    const isHighRtt = this.lastSmoothedRtt > 600;
-    const isOveruse = this.delayTrend > 20 || isBufferGrowing || isHighRtt;
+    // Phase 3: Higher RTT tolerance for mobile (1000ms instead of 600ms).
+    const isHighRtt = this.lastSmoothedRtt > 1000;
+    const isOveruse = this.delayTrend > 25 || isBufferGrowing || isHighRtt;
 
     if (isOveruse) {
-      // Кулдаун снижения в 200мс (совпадает с интервалом обновления)
-      if (this.aiState !== 'congested' || now - this.lastCongestionTs > 200) {
+      if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
-        // Если пинг зашкаливает (>1.5с), рубим до пола сразу!
-        let cutFactor = 0.8;
-        if (this.lastSmoothedRtt > 1500) cutFactor = 0.5;
-        if (this.lastSmoothedRtt > 3000) cutFactor = 0.2;
+        // Dynamic cut factor
+        let cutFactor = 0.85; 
+        if (this.lastSmoothedRtt > 1500) cutFactor = 0.6;
+        if (this.lastSmoothedRtt > 3000) cutFactor = 0.3;
 
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
@@ -426,11 +425,11 @@ export class AdaptiveH264Engine {
         stateChanged = true;
       }
 
-      if (this.aiState === 'steady' && this.lastSmoothedRtt < 500) {
+      if (this.aiState === 'steady' && this.lastSmoothedRtt < 900) {
         if (now - this.lastSteadyIncrease > 400) {
-          // Additive Increase: Очень медленно
-          const growth = this.lastSmoothedRtt < 150 ? 20000 : 8000;
-          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + growth);
+          // Phase 3: Exponential growth (+10%) to leverage 50Mbps links quickly
+          const growth = this.targetBitrate * 0.10; 
+          this.targetBitrate = Math.min(this.maxBitrate, this.targetBitrate + Math.max(20000, growth));
           this.lastSteadyIncrease = now;
         }
 
@@ -563,10 +562,10 @@ export class AdaptiveH264Engine {
     this.lastTokenUpdate = now;
     this.lastCongestionTs = 0;
     this.aiState = 'steady';
-    this.targetBitrate = 400_000; // Safer start
+    this.targetBitrate = 1_000_000; // Phase 3: High bandwidth start
     this.frameId = 0;
     this.applyBitrateToParams();
-    if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
+    if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Probing mode (1Mbps start), GOP=Infinite`);
   }
 
   public async stop() {
@@ -740,14 +739,14 @@ export class AdaptiveH264Engine {
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
 
-    // Phase 2: No acceleration multiplier. If the queue is growing, the Encoder must slow down.
-    const multiplier = 1.0; 
+    // Phase 3: Recover multiplier to clear bursts
+    const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1; 
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
-    // Phase 2: Smooth flow – 16KB per tick (~25 Mbps burst cap per tick, but overall capped by bitrate)
-    const MAX_BYTES_PER_TICK = 16384; 
+    // Phase 3: 64KB per tick (~100 Mbps burst capacity)
+    const MAX_BYTES_PER_TICK = 65536; 
     
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;

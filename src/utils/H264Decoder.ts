@@ -209,9 +209,8 @@ export class H264Decoder {
     const lastPacket = this.jitterBuffer[this.jitterBuffer.length - 1];
     const bufferDuration = lastPacket.senderTs - firstPacket.senderTs;
 
-    // Phase 2: Catch-up logic via hard skip. If lag > 400ms, drop everything until the latest keyframe.
-    // This is much better than batch-decoding for CPU and battery.
-    if (bufferDuration > 400 || this.jitterBuffer.length > 30) {
+    // Phase 3: Relaxed jump threshold (800ms) to allow more jitter on 4G/5G.
+    if (bufferDuration > 800 || this.jitterBuffer.length > 45) {
       let latestKeyIdx = -1;
       for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
         if (this.jitterBuffer[i].type === 'key') {
