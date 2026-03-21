@@ -1501,12 +1501,12 @@ export default function Dashboard() {
             className="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 max-w-2xl w-full relative flex flex-col max-h-[90vh]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-4 flex-shrink-0">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <Settings className="text-zinc-400" />
-                Логи и Отладка
+            <div className="flex items-center justify-between mb-4 flex-shrink-0 gap-2">
+              <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 min-w-0">
+                <Settings className="text-zinc-400 hidden xs:block flex-shrink-0" />
+                <span className="truncate">Логи и Отладка</span>
               </h2>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <button 
                   onClick={downloadAllLogs}
                   className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400 hover:text-white"
@@ -1567,13 +1567,13 @@ export default function Dashboard() {
                 </div>
 
                 {/* Action buttons */}
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex flex-wrap gap-2 flex-shrink-0">
                   <button 
                     onClick={() => {
                       const text = JSON.stringify(metricHistory, null, 2);
                       navigator.clipboard.writeText(text).then(() => showToast('JSON скопирован!')).catch(() => showToast('Ошибка копирования'));
                     }}
-                    className="flex-1 py-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 min-w-[140px] py-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     <Copy size={16} />
                     Копировать JSON
@@ -1583,7 +1583,7 @@ export default function Dashboard() {
                       const data = JSON.stringify(metricHistory, null, 2);
                       downloadFile(data, `metrics-${Date.now()}.json`, 'application/json');
                     }}
-                    className="flex-1 py-3 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 min-w-[140px] py-3 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     <SignalHigh size={16} />
                     Скачать .json
@@ -1598,14 +1598,14 @@ export default function Dashboard() {
                       });
                       downloadFile(text, `metrics-${Date.now()}.txt`, 'text/plain');
                     }}
-                    className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 border border-zinc-700"
+                    className="flex-1 min-w-[140px] py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 border border-zinc-700"
                   >
                     <Download size={16} />
                     Скачать .txt
                   </button>
                   <button 
                     onClick={() => showToast('Очищено — данные следующего звонка будут чистыми')}
-                    className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl font-semibold transition-colors"
+                    className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl font-semibold transition-colors flex items-center justify-center"
                     title="Очистить историю"
                   >
                     <X size={16} />
@@ -1630,19 +1630,19 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex flex-wrap gap-2 flex-shrink-0">
                   <button 
                     onClick={() => {
                       navigator.clipboard.writeText(logs.join('\n')).then(() => showToast('Скопировано!')).catch(() => showToast('Ошибка'));
                     }}
-                    className="flex-1 py-3 bg-zinc-700 hover:bg-zinc-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 min-w-[140px] py-3 bg-zinc-700 hover:bg-zinc-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                   >
                     <Copy size={16} />
                     Копировать журнал
                   </button>
                 <button 
                   onClick={exportLogs}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
+                  className="flex-1 min-w-[100px] flex items-center justify-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors"
                   title="Отправить логи администратору"
                 >
                   <Share2 size={14} />
@@ -1650,18 +1650,19 @@ export default function Dashboard() {
                 </button>
                 <button 
                   onClick={() => downloadFile(logs.join('\n'), `system-log-${Date.now()}.log`, 'text/plain')}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors border border-zinc-700"
+                  className="flex-1 min-w-[110px] flex items-center justify-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors border border-zinc-700"
                   title="Скачать системный журнал (.log)"
                 >
                   <Download size={14} />
                   <span>Скачать .log</span>
                 </button>
-              <button 
-                onClick={() => setLogs([])}
-                    className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl font-semibold transition-colors"
-                  >
-                    Очистить
-                  </button>
+                <button 
+                  onClick={() => setLogs([])}
+                  className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-xl font-semibold transition-colors flex items-center justify-center"
+                   title="Очистить журнал"
+                >
+                  <X size={16} />
+                </button>
                 </div>
               </div>
             )}
