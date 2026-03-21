@@ -68,17 +68,19 @@ async function startServer() {
     const senderId = Math.random().toString(36).substring(7);
     (ws as any).id = senderId;
 
-    // Optimize socket buffers for media streaming (Secure Relay)
+    /* 
+    // Optimization: Let the OS handle socket buffers for better throughput on high-bandwidth links.
+    // Manual limits (64KB) were causing protocol-level bottlenecks (~10Mbps cap).
     const rawSocket = (ws as any)._socket;
     if (rawSocket && typeof rawSocket.setSendBufferSize === 'function') {
       try {
-        // FIX: Bufferbloat prevention. 64KB instead of 2MB so TCP backpressure kicks in early
-        rawSocket.setSendBufferSize(64 * 1024);
-        rawSocket.setReceiveBufferSize(64 * 1024);
+        rawSocket.setSendBufferSize(128 * 1024);
+        rawSocket.setReceiveBufferSize(128 * 1024);
       } catch (e) {
         console.warn('⚠️ Failed to tune socket buffers:', (e as Error).message);
       }
     }
+    */
 
     if (!roomId) {
       ws.close();

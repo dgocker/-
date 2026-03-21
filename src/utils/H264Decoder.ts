@@ -11,7 +11,8 @@ export class H264Decoder {
   private ctx: CanvasRenderingContext2D;
   private decoder: VideoDecoder | null = null;
   private jitterBuffer: VideoPacket[] = [];
-  private targetDelay = 500; // Fixed large value to handle RTT spikes
+  private targetDelay = 50; // Audit Recommendation: Lower latency for TCP
+  // Fixed large value to handle RTT spikes
 
   private isPlaying = false;
   private onLog?: (msg: string) => void;
@@ -147,7 +148,7 @@ export class H264Decoder {
 
         const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
         
-        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
+        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * multiplier)));
         this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
       }
     }

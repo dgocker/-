@@ -121,7 +121,7 @@ export class AdaptiveH264Engine {
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
   private minBitrate: number = 80_000;    // FIX: iOS WebCodecs freezes silently at <60k. 80k is safe floor.
-  private maxBitrate: number = 2_500_000; // Было 4_000_000
+  private maxBitrate: number = 15_000_000; // Raised for 50Mbps support
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
   private lastEncodeTs: number = performance.now(); // Watchdog tracking
@@ -129,6 +129,7 @@ export class AdaptiveH264Engine {
 
   private sendQueue: { data: Uint8Array; enqueueTime: number }[] = [];
   private frameId: number = 0;
+  private timerId: any = null; // Support for setInterval
   private droppedFrames: number = 0;
   private droppedFramesWindow: number = 0;
   private droppedFramesRate: number = 0;
@@ -215,6 +216,12 @@ export class AdaptiveH264Engine {
           const startTime = performance.now();
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
+          // Task 17 Refined: Don't drop large I-frames. Raised to 1.5MB for 1080p high-quality.
+          if (data.length > 1500000) {
+            if (this.onLog) this.onLog(`\u26A0\uFE0F Frame too large (${Math.round(data.length / 1024)}KB), dropping`);
+            this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+            return;
+          }
           // Делегируем в отдельный метод, чтобы не блокировать поток энкодера
           this.processEncodedFrame(data, startTime);
         },
@@ -542,24 +549,31 @@ export class AdaptiveH264Engine {
     this.isRunning = true;
     const now = performance.now();
     this.sessionStartTime = now;
+    this.lastPacerRun = performance.now();
+    
+    // Switch to setInterval to prevent browser freezing in background tabs
+    this.timerId = setInterval(() => {
+      this.loop().catch(() => {});
+    }, 1000 / 30); // Target 30fps baseline
+
+    this.pacerInterval = setInterval(() => this.runPacer(), 10);
     this.lastAIUpdate = now;
     this.lastTokenUpdate = now;
-    this.lastPacerRun = now;
     this.lastCongestionTs = 0;
     this.aiState = 'steady';
     this.targetBitrate = 400_000; // Safer start
     this.frameId = 0;
     this.applyBitrateToParams();
     if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
-    this.pacerInterval = setInterval(() => this.runPacer(performance.now()), 10);
-    this.rafId = requestAnimationFrame(this.loop);
   }
 
   public async stop() {
     this.isRunning = false;
     this.sendQueue = [];
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    if (this.timerId) {
+      clearInterval(this.timerId);
+      this.timerId = null;
+    }
     if (this.pacerInterval) clearInterval(this.pacerInterval);
     this.pacerInterval = null;
 
@@ -590,12 +604,12 @@ export class AdaptiveH264Engine {
     this.needsKeyframe = true;
   }
 
-  private loop = async (now: number) => {
+  private loop = async () => {
     if (!this.isRunning) return;
+    const now = performance.now();
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.lastFrameTime = now;
       this.lastTokenUpdate = now;
-      this.rafId = requestAnimationFrame(this.loop);
       return;
     }
 
@@ -706,10 +720,10 @@ export class AdaptiveH264Engine {
         this.onLog(`📤 Send rate: ${kbps} kbps, buffer: ${this.sendQueue.length} frames (${Math.round(queueBytes / 1024)}KB), tokens=${Math.round(this.tokenBucketBytes / 1024)}KB`);
       }
     }
-    this.rafId = requestAnimationFrame(this.loop);
   };
 
-  private runPacer(now: number) {
+  private runPacer() {
+    const now = performance.now();
     if (this.sendQueue.length > 0 && this.onLog && now - this.lastPacerLog > 1000) {
       this.onLog(`🏃 Pacer: queue=${this.sendQueue.length}, tokens=${Math.round(this.pacerTokens)}`);
       this.lastPacerLog = now;
@@ -735,9 +749,9 @@ export class AdaptiveH264Engine {
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
     let bytesSentThisTick = 0;
-    // Снижаем лимит на один цикл таймера (разгружаем Event Loop и сокет)
-    const MAX_BYTES_PER_TICK = 16384; 
-
+    // Снижаем лимит на один цикл таймера (разгружаем процессор)
+    const MAX_BYTES_PER_TICK = 131072; // ~100 Mbps burst limit (Raised from 16KB)
+    
     while (this.sendQueue.length > 0 && this.pacerTokens >= 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const chunk = this.sendQueue[0].data;
       this.ws.send(chunk);
@@ -788,8 +802,8 @@ export class AdaptiveH264Engine {
         this.needsKeyframe = true;
       }
 
-      // Attempt 5: Increased encodeQueueSize limit
-      if (this.encoder.encodeQueueSize > 4) {
+      // Attempt 5: Increased encodeQueueSize limit for high-FPS support
+      if (this.encoder.encodeQueueSize > 10) {
         frame.close();
         return false;
       }
