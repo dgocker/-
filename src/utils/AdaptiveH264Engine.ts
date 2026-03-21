@@ -769,10 +769,7 @@ export class AdaptiveH264Engine {
     // Этого хватит для плавного проброса 1-2 дельта-кадров, но огромный I-кадр
     // будет аккуратно поделен на части.
     const maxPacerBurst = Math.max(15000, bytesPerMs * 40);
-    // 2. Строгий запрет на глубокий долг!
-    // Как только ушли в минус на размер пары фрагментов (около 3000 байт) - стоп!
-    // Pacer замолчит и будет ждать следующего тика таймера.
-    const maxPacerDebt = -3000;
+
 
     // Phase 3: Recover multiplier to clear bursts
     const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1;
@@ -795,7 +792,10 @@ export class AdaptiveH264Engine {
     // Защита от глубокого минуса токенов (минимум 100 КБ долга или 1.5 сек)
     // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
     const calculatedDebt = -(this.targetBitrate / 8) * 1.5;
-    const maxPacerDebt = Math.min(-100000, calculatedDebt);
+    // 2. Строгий запрет на глубокий долг!
+    // Как только ушли в минус на размер пары фрагментов (около 3000 байт) - стоп!
+    // Pacer замолчит и будет ждать следующего тика таймера.
+    const maxPacerDebt = -3000;
 
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
