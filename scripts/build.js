@@ -1,8 +1,16 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import https from 'https';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+console.log('🧹 Clearing server logs...');
+try {
+  execSync('truncate -s 0 /var/www/my-app/logs/server.log', { stdio: 'inherit' });
+  console.log('✅ Server logs cleared.');
+} catch (e) {
+  console.warn('⚠️ Failed to clear server logs (might be local build or permission issue):', e.message);
+}
 
 console.log('🚀 Starting build process...');
 const buildProcess = spawn('npx', ['vite', 'build'], { stdio: 'inherit', shell: true });

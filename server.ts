@@ -68,6 +68,17 @@ async function startServer() {
     const senderId = Math.random().toString(36).substring(7);
     (ws as any).id = senderId;
 
+    // Optimize socket buffers for media streaming (Secure Relay)
+    const rawSocket = (ws as any)._socket;
+    if (rawSocket && typeof rawSocket.setSendBufferSize === 'function') {
+      try {
+        rawSocket.setSendBufferSize(2 * 1024 * 1024); // 2 MB
+        rawSocket.setReceiveBufferSize(2 * 1024 * 1024); // 2 MB
+      } catch (e) {
+        console.warn('⚠️ Failed to tune socket buffers:', (e as Error).message);
+      }
+    }
+
     if (!roomId) {
       ws.close();
       return;
