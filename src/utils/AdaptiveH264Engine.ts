@@ -380,8 +380,8 @@ export class AdaptiveH264Engine {
 
     const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
 
-    // Снижаем допустимый лимит буфера для штрафа до 100 КБ (защита от OS Bufferbloat)
-    const maxWsBuffer = Math.max(100000, (this.targetBitrate / 8) * 0.5);
+    // FIX: Снижаем допустимый лимит буфера для штрафа до 16 КБ (защита от OS Bufferbloat)
+    const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 0.5);
     const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
     if (bufferPressure > 0.3) {
       const penalty = (bufferPressure - 0.3) * 0.6;
@@ -635,7 +635,7 @@ export class AdaptiveH264Engine {
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
 
-      const maxWsBuffer = Math.max(100000, (this.targetBitrate / 8) * 1.5);
+      const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 1.5);
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
         this.droppedFramesWindow++;

@@ -441,10 +441,9 @@ export function useSecureRelayCall(
         const senderTs = startTimeRef.current > 0 ? Math.floor(performance.now() - startTimeRef.current) : 0;
         const buffered = wsRef.current.bufferedAmount || 0;
         
-        // Если буфер сокета переполнен (> 150 КБ), пропускаем отправку аудио (Drop),
-        // чтобы не усугублять RTT Panic и дать возможность передать ключевой кадр видео.
-        if (buffered > 150000) {
-          // Пропускаем отправку (возникнет легкое заикание, но RTT не улетит в 18 секунд)
+        // FIX: RTT Bufferbloat. Если буфер сокета > 16 КБ, дропаем аудио!
+        // Это предотвратит рост пинга до 15 секунд при забитом канале.
+        if (buffered > 16384) {
           return; 
         }
         
