@@ -114,7 +114,7 @@ async function startServer() {
             // FIX: Server-side Backpressure for slow receivers (Download < Upload).
             // If the receiver's download link is too slow, their buffer will grow indefinitely.
             // Drop binary (media) packets to keep the queue small and prevent 35,000ms RTT explosions.
-            if (isBinary && client.bufferedAmount > 16384) {
+            if (isBinary && client.bufferedAmount > 65536) {
               return; // Drop packet
             }
             try {

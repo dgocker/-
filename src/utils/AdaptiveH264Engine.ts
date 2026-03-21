@@ -394,13 +394,13 @@ export class AdaptiveH264Engine {
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
 
     // Четкое условие перегрузки: доверяем RTT
-    const isOveruse = this.delayTrend > 20 || isBufferGrowing || queueDelay > 200 || this.lastSmoothedRtt > 250;
+    const isOveruse = this.delayTrend > 20 || isBufferGrowing || this.lastSmoothedRtt > 600;
 
     if (isOveruse) {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 1000) {
         this.aiState = 'congested';
         // Multiplicative Decrease: Жестко рубим
-        const cutFactor = this.lastSmoothedRtt > 500 ? 0.6 : 0.8;
+        const cutFactor = this.lastSmoothedRtt > 1000 ? 0.6 : 0.8;
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
         stateChanged = true;
@@ -445,10 +445,10 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.lastRtt = rtt;
 
-    // Экстренный тормоз: доверяем RTT. Если пинг > 600мс, режем битрейт сразу!
-    if (rtt > 600 && now - this.lastCongestionTs > 1000) {
+    // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс (для мобилок это край), режем битрейт.
+    if (rtt > 1200 && now - this.lastCongestionTs > 1000) {
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
-      this.sendQueue = [];
+      // FIX: DO NOT clear sendQueue here! Clearing queue loses I-frames, inducing requestKeyframe storms.
       this.applyBitrateToParams();
       this.aiState = 'congested';
       this.lastCongestionTs = now;
@@ -603,8 +603,8 @@ export class AdaptiveH264Engine {
       const maxBurst = (this.targetBitrate / 8) * 0.5;
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
 
-      // СТАЛО (разрешаем уходить в минус на размер 2 секундного битрейта, чтобы Pacer честно ждал):
-      const maxDebt = -(this.targetBitrate / 8) * 2; 
+      // СТАЛО (разрешаем уходить в минус на размер 4 секундного битрейта, чтобы I-кадры не сталлили движок на старте):
+      const maxDebt = -(this.targetBitrate / 8) * 4; 
       if (this.tokenBucketBytes < maxDebt) {
         this.tokenBucketBytes = maxDebt;
       }
@@ -629,7 +629,8 @@ export class AdaptiveH264Engine {
 
       const { bufferedAmount } = this.getNetworkMetrics();
       const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
-      const isInternalQueuePanic = this.sendQueue.length > 80 || queueBytes > 2048000;
+      // FIX: Increase queue panic thresholds. 200 frames is ~8s of 24fps data.
+      const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
 
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
