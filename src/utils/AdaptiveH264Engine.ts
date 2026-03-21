@@ -491,9 +491,9 @@ export class AdaptiveH264Engine {
   public updateRemoteJitter(jitter: number) {
     this.lastRemoteJitter = jitter;
     
-    // Если пакеты начали приходить неравномерно (jitter > 150мс),
+    // Если пакеты начали приходить неравномерно (jitter > 300мс),
     // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
-    if (jitter > 150 && this.aiState !== 'congested') {
+    if (jitter > 300 && this.aiState !== 'congested') {
       if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
       
       this.aiState = 'congested';
@@ -617,7 +617,10 @@ export class AdaptiveH264Engine {
   }
 
   public forceKeyframe() {
-    this.needsKeyframe = true;
+    const now = performance.now();
+    if (now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
+      this.needsKeyframe = true;
+    }
   }
 
   private loop = async () => {
@@ -676,10 +679,19 @@ export class AdaptiveH264Engine {
       // Если очередь слишком большая, сбрасываем её полностью
       if (this.sendQueue.length > 150) {
         if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
+        
         this.sendQueue = []; // Очищаем полностью
         this.pacerTokens = Math.max(0, this.pacerTokens); // Сбрасываем долг пейсера, чтобы сразу слать
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5); // Режем качество в 2 раза
+        
+        // Режем битрейт не так радикально (на 30%, а не на 50%)
+        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.7);
         this.applyBitrateToParams(true);
+
+        // МЫ ОБЯЗАНЫ запросить Keyframe, т.к. старые кадры удалены!
+        // Но уважаем кулдаун, чтобы не убить процессор.
+        if (now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
+          this.needsKeyframe = true;
+        }
       }
 
       const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
@@ -772,9 +784,11 @@ export class AdaptiveH264Engine {
       this.sendQueue.shift();
     }
 
-    // Защита от глубокого минуса токенов (не более 1.5 секунд долга)
+    // Защита от глубокого минуса токенов (минимум 100 КБ долга или 1.5 сек)
     // Чтобы пейсер не замирал надолго после отправки тяжелого I-Frame
-    const maxPacerDebt = -(this.targetBitrate / 8) * 1.5; 
+    const calculatedDebt = -(this.targetBitrate / 8) * 1.5;
+    const maxPacerDebt = Math.min(-100000, calculatedDebt); 
+
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
     }
