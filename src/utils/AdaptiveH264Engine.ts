@@ -148,6 +148,8 @@ export class AdaptiveH264Engine {
   private lastRateLog: number = 0;
   private lastPacerLog: number = 0;
   private lastCongestionUpdate: number = 0;
+  private lastKeyframeSentTs: number = 0;
+  private readonly KEYFRAME_COOLDOWN = 2000; // Не слать I-кадры чаще чем раз в 2 сек (Task 21)
   private readonly CONGESTION_UPDATE_INTERVAL: number = 1000;
 
   private manualMode: boolean = false;
@@ -597,6 +599,14 @@ export class AdaptiveH264Engine {
 
     this.updateCongestionControl();
 
+    // Reset keyframe flag if within cooldown to prevent storm
+    if (this.needsKeyframe && now - this.lastKeyframeSentTs < this.KEYFRAME_COOLDOWN) {
+      if (this.frameId % 30 === 0 && this.onLog) {
+          this.onLog(`🛡️ Keyframe suppressed (cooldown: ${Math.round(this.KEYFRAME_COOLDOWN - (now - this.lastKeyframeSentTs))}ms remaining)`);
+      }
+      this.needsKeyframe = false;
+    }
+
     const timeDeltaMs = now - this.lastTokenUpdate;
     if (timeDeltaMs > 0) {
       const tokensToAdd = (this.targetBitrate / 8) * (timeDeltaMs / 1000);
@@ -768,8 +778,13 @@ export class AdaptiveH264Engine {
         return false;
       }
 
+      const isKey = this.needsKeyframe || this.frameId === 0;
+      if (isKey) {
+          this.lastKeyframeSentTs = now;
+      }
+
       this.pendingFrames++;
-      this.encoder.encode(frame, { keyFrame: this.needsKeyframe || this.frameId === 0 });
+      this.encoder.encode(frame, { keyFrame: isKey });
       this.needsKeyframe = false;
       frame.close();
       return true;
