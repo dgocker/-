@@ -61,6 +61,7 @@ export function useSecureRelayCall(
   const orientationListenerRef = useRef<(() => void) | null>(null);
   // === ДОБАВИТЬ ЭТО ===
   const socketRef = useRef<Socket | null>(socket);
+  const lastRemoteKeyframeRequestTs = useRef<number>(0); // Добавь это сюда
   useEffect(() => {
     socketRef.current = socket;
   }, [socket]);
@@ -98,14 +99,19 @@ export function useSecureRelayCall(
       }
       return;
     }
+    // ... внутри handleMediaControlRef.current ...
+
     if (msg.type === 'requestKeyframe') {
+      const now = performance.now();
+
+      // Проверка кулдауна: не чаще 1 раза в 2 секунды
+      if (now - lastRemoteKeyframeRequestTs.current < 2000) {
+        // addLog('🛡️ Remote requestKeyframe ignored: cooldown active'); // Опционально для отладки
+        return;
+      }
+
       if (adaptiveEngineRef.current) {
-        // FIX: Add a local debounce/cooldown to prevent processing too many requests
-        const now = performance.now();
-        if ((adaptiveEngineRef.current as any)._lastRemoteRequestTs && now - (adaptiveEngineRef.current as any)._lastRemoteRequestTs < 2000) {
-          return;
-        }
-        (adaptiveEngineRef.current as any)._lastRemoteRequestTs = now;
+        lastRemoteKeyframeRequestTs.current = now; // Запоминаем время успешного запроса
         adaptiveEngineRef.current.forceKeyframe();
         addLog('🚀 Remote requested keyframe via Socket.io, forcing now');
       }
