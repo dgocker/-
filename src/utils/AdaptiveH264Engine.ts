@@ -764,8 +764,16 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
-    const maxPacerBurst = Math.max(60000, bytesPerMs * 150); // Разрешаем выброс до 60 КБ или 150мс
 
+    // 1. Строгий лимит на "выброс". Максимум 15-20 КБ за один тик.
+    // Этого хватит для плавного проброса 1-2 дельта-кадров, но огромный I-кадр 
+    // будет аккуратно поделен на части.
+    const maxPacerBurst = Math.max(15000, bytesPerMs * 40);
+
+    // 2. Строгий запрет на глубокий долг! 
+    // Как только ушли в минус на размер пары фрагментов (около 3000 байт) - стоп!
+    // Pacer замолчит и будет ждать следующего тика таймера.
+    const maxPacerDebt = -3000;
     // Phase 3: Recover multiplier to clear bursts
     const multiplier = this.sendQueue.length > 5 ? 1.5 : 1.1;
 
