@@ -59,7 +59,12 @@ export function useSecureRelayCall(
   const mySidRef = useRef<string>(Math.random().toString(36).substring(7));
   const isCleanedUpRef = useRef(false);
   const orientationListenerRef = useRef<(() => void) | null>(null);
-
+  // === ДОБАВИТЬ ЭТО ===
+  const socketRef = useRef<Socket | null>(socket);
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+  // ===================
   // === НОВЫЙ БЛОК: Слушатель команд управления через Socket.io ===
   // === НОВЫЙ БЛОК: Слушатель команд управления через Socket.io ===
   const handleMediaControlRef = useRef<((data: any) => void) | null>(null);
@@ -70,7 +75,7 @@ export function useSecureRelayCall(
     const msg = payload;
 
     if (msg.type === 'ping') {
-      socket?.emit('media_control', {
+      socketRef.current?.emit('media_control', {
         roomId: currentRoomIdRef.current,
         payload: { type: 'pong', ts: msg.ts, sid: msg.sid }
       });
@@ -133,7 +138,7 @@ export function useSecureRelayCall(
       if (ws.readyState === WebSocket.OPEN) {
         pingCounter++;
         if (pingCounter >= 2) { // Every 200ms (2 * 100ms) - Task 28
-          socket?.emit('media_control', {
+          socketRef.current?.emit('media_control', {
             roomId: currentRoomIdRef.current,
             payload: { type: 'ping', ts: performance.now(), sid: mySidRef.current }
           });
@@ -681,7 +686,7 @@ export function useSecureRelayCall(
 
       // Send initial orientation (Confirmed by Audit 1, 3)
       const initialRotation = window.orientation || (window.screen as any).orientation?.angle || 0;
-      socket?.emit('media_control', {
+      socketRef.current?.emit('media_control', {
         roomId: currentRoomIdRef.current,
         payload: { type: 'rotation', rotation: initialRotation, sid: mySidRef.current }
       });
@@ -694,7 +699,7 @@ export function useSecureRelayCall(
       // Send OS info to help receiver correct orientation (Android fix)
       const isAndroid = /Android/i.test(navigator.userAgent);
       if (isAndroid) {
-        socket?.emit('media_control', {
+        socketRef.current?.emit('media_control', {
           roomId: currentRoomIdRef.current,
           payload: { type: 'info', os: 'android', sid: mySidRef.current }
         });
@@ -881,7 +886,7 @@ export function useSecureRelayCall(
 
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  socket?.emit('media_control', {
+                  socketRef.current?.emit('media_control', {
                     roomId: currentRoomIdRef.current,
                     payload: { type: 'requestKeyframe', senderId }
                   });
@@ -953,7 +958,7 @@ export function useSecureRelayCall(
               }
               if (!h264DecodersRef.current[senderId] && remoteCanvasRef.current) {
                 h264DecodersRef.current[senderId] = new H264Decoder(remoteCanvasRef.current, addLog, (isPanic) => {
-                  socket?.emit('media_control', {
+                  socketRef.current?.emit('media_control', {
                     roomId: currentRoomIdRef.current,
                     payload: { type: 'requestKeyframe', senderId }
                   });
@@ -1031,7 +1036,7 @@ export function useSecureRelayCall(
   useEffect(() => {
     const handleOrientationChange = () => {
       const angle = window.orientation || (window.screen as any).orientation?.angle || 0;
-      socket?.emit('media_control', {
+      socketRef.current?.emit('media_control', {
         roomId: currentRoomIdRef.current,
         payload: { type: 'rotation', rotation: angle, sid: mySidRef.current }
       });
