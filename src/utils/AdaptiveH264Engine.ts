@@ -117,8 +117,9 @@ export class AdaptiveH264Engine {
   private pacerTokens: number = 0;
   private lastPacerRun: number = performance.now();
 
-  private targetBitrate: number = 500_000;
+  private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
+  private lastConfiguredTs: number = 0;
   private minBitrate: number = 150_000;   // Чуть ниже для полей (Edge/3G)
   private maxBitrate: number = 2_500_000; // Было 4_000_000
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
@@ -315,28 +316,25 @@ export class AdaptiveH264Engine {
   private applyBitrateToParams() {
     if (!this.encoder || !this.isConfigured) return;
 
+    // ИСПРАВЛЕНИЕ 1: Запрещаем менять разрешение и битрейт чаще, чем раз в 2 секунды.
+    // Это спасет от "шторма" ключевых кадров!
+    const now = performance.now();
+    if (now - this.lastConfiguredTs < 2000) return; 
+
     const kbps = this.targetBitrate / 1024;
-
-    // Математика распределения:
-    // < 300 kbps: 10 FPS (экономия для голоса и базовых движений)
-    // < 800 kbps: 15 FPS (плавно для вебки, экономит 50% битрейта)
-    // < 1500 kbps: 24 FPS (кинематографичный стандарт)
-    // > 1500 kbps: 30 FPS
-
+    
     if (kbps < 300) this.currentFps = 10;
-    else if (kbps < 800) this.currentFps = 15;
-    else if (kbps < 1500) this.currentFps = 24;
+    else if (kbps < 600) this.currentFps = 15;
+    else if (kbps < 1200) this.currentFps = 24;
     else this.currentFps = 30;
 
-    // Динамическое разрешение на основе битрейта (Telegram way)
     if (kbps < 400) {
-      this.currentScale = 0.3; // Уход в ~240p
+      this.currentScale = 0.3;
     } else if (kbps < 800) {
-      this.currentScale = 0.5; // Уход в ~360p
+      this.currentScale = 0.5;
     } else if (kbps < 1500) {
-      this.currentScale = 0.75; // Уход в ~480p/540p
+      this.currentScale = 0.75;
     } else {
-      // Если RTT хороший, возвращаем 720p
       this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
     }
 
@@ -345,18 +343,18 @@ export class AdaptiveH264Engine {
       try {
         this.encoder.configure({
           codec: "avc1.42e01f",
-          width: this.currentWidth,
+          width: this.currentWidth, 
           height: this.currentHeight,
           bitrate: this.targetBitrate,
           bitrateMode: 'variable',
           latencyMode: "realtime",
-          // Уменьшаем GOP (key_frame_interval) для сетей с потерями.
-          // Если FPS падает до 15, I-Frame каждые 60 кадров = каждые 4 секунды (слишком долго для восстановления)
-          // Ставим I-frame каждые 2 секунды:
           // @ts-ignore
-          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 }
+          avc: { format: "annexb", key_frame_interval: this.currentFps * 2 } 
         });
         this.lastConfiguredBitrate = this.targetBitrate;
+        
+        // Запоминаем время успешной конфигурации
+        this.lastConfiguredTs = now; 
       } catch (e) { }
     }
   }
@@ -542,7 +540,7 @@ export class AdaptiveH264Engine {
     this.lastPacerRun = now;
     this.lastCongestionTs = 0;
     this.aiState = 'steady';
-    this.targetBitrate = 500_000;
+    this.targetBitrate = 600_000;
     this.frameId = 0;
     this.applyBitrateToParams();
     if (this.onLog) this.onLog(`\uD83D\uDE80 Sender started: Fixed 1Mbps, GCC disabled, GOP=60`);
