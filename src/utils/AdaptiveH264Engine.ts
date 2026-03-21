@@ -120,7 +120,7 @@ export class AdaptiveH264Engine {
   private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
-  private minBitrate: number = 150_000;   // Чуть ниже для полей (Edge/3G)
+  private minBitrate: number = 30_000;    // СТАЛО (30 кбит/с - ультра-низкий режим)
   private maxBitrate: number = 2_500_000; // Было 4_000_000
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
@@ -316,30 +316,34 @@ export class AdaptiveH264Engine {
   private applyBitrateToParams() {
     if (!this.encoder || !this.isConfigured) return;
 
-    // ИСПРАВЛЕНИЕ 1: Запрещаем менять разрешение и битрейт чаще, чем раз в 2 секунды.
+    // ИСПРАВЛЕНИЕ 1: Запрещаем менять разрешение и битрейт чаще, чем раз в 3.5 секунды.
     // Это спасет от "шторма" ключевых кадров!
     const now = performance.now();
-    if (now - this.lastConfiguredTs < 2000) return; 
+    if (now - this.lastConfiguredTs < 3500) return; 
 
     const kbps = this.targetBitrate / 1024;
     
-    if (kbps < 300) this.currentFps = 10;
-    else if (kbps < 600) this.currentFps = 15;
-    else if (kbps < 1200) this.currentFps = 24;
-    else this.currentFps = 30;
-
-    if (kbps < 400) {
+    // Динамическое понижение FPS и разрешения при экстремальном падении
+    if (kbps < 100) {
+      this.currentFps = 5; // Слайдшоу для выживания
+      this.currentScale = 0.2; // Сильное мыло, но сеть не упадет
+    } else if (kbps < 300) {
+      this.currentFps = 10;
       this.currentScale = 0.3;
-    } else if (kbps < 800) {
+    } else if (kbps < 600) {
+      this.currentFps = 15;
       this.currentScale = 0.5;
-    } else if (kbps < 1500) {
+    } else if (kbps < 1200) {
+      this.currentFps = 24;
       this.currentScale = 0.75;
     } else {
+      this.currentFps = 30;
       this.currentScale = this.lastSmoothedRtt > 800 ? 0.75 : 1.0;
     }
 
+    // Применяем настройки только если битрейт изменился более чем на 15% (было 5%)
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
-    if (diffRatio >= 0.05) {
+    if (diffRatio >= 0.15) {
       try {
         this.encoder.configure({
           codec: "avc1.42e01f",
@@ -600,8 +604,8 @@ export class AdaptiveH264Engine {
       const maxBurst = (this.targetBitrate / 8) * 0.5;
       this.tokenBucketBytes = Math.min(this.tokenBucketBytes + tokensToAdd, maxBurst);
 
-      // ВОЗВРАЩАЕМ ПРОЩЕНИЕ ДОЛГА ИЗ ТЕСТА:
-      const maxDebt = -this.targetBitrate / 40;
+      // СТАЛО (разрешаем уходить в минус на размер 2 секундного битрейта, чтобы Pacer честно ждал):
+      const maxDebt = -(this.targetBitrate / 8) * 2; 
       if (this.tokenBucketBytes < maxDebt) {
         this.tokenBucketBytes = maxDebt;
       }
@@ -695,9 +699,8 @@ export class AdaptiveH264Engine {
     // Это сделает отправку по сети максимально "ровной" струйкой.
     const maxPacerBurst = Math.max(2000, bytesPerMs * 30); // Запас на 30мс
 
-    // Убираем множитель 1.8, если очередь большая. Он заставлял Pacer паниковать 
-    // и заливать сеть трафиком именно тогда, когда сеть УЖЕ тормозила.
-    const multiplier = this.sendQueue.length > 10 ? 1.2 : 1.0;
+    // СТАЛО (убираем ускорение, вводим легкое торможение при заторе):
+    const multiplier = this.sendQueue.length > 10 ? 0.9 : 1.0;
 
     this.pacerTokens = Math.min(maxPacerBurst, this.pacerTokens + (bytesPerMs * multiplier) * pacerDeltaMs);
 
