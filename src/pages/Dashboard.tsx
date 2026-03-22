@@ -137,6 +137,30 @@ export default function Dashboard() {
     const fullLogs = logs.join('\n') + metricsSection;
     downloadFile(fullLogs, `debug-logs-${Date.now()}.txt`, 'text/plain');
   };
+
+  const shareFile = async (content: string, filename: string, mimeType: string) => {
+    if (!navigator.share) {
+      downloadFile(content, filename, mimeType);
+      return;
+    }
+    try {
+      const file = new File([content], filename, { type: mimeType });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: filename,
+          text: 'Технические логи звонка',
+        });
+      } else {
+        downloadFile(content, filename, mimeType);
+      }
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.warn('Sharing failed, falling back to download', e);
+        downloadFile(content, filename, mimeType);
+      }
+    }
+  };
   
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -1512,11 +1536,24 @@ export default function Dashboard() {
               </h2>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button 
-                  onClick={downloadAllLogs}
+                  onClick={() => {
+                    let metricsSection = "\n\n=== CALL METRICS HISTORY ===\n";
+                    if (metricHistory.length > 0) {
+                      metricsSection += "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
+                      metricHistory.forEach(m => {
+                        const time = new Date(m.ts).toLocaleTimeString();
+                        metricsSection += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
+                      });
+                    } else {
+                      metricsSection += "No metrics available.\n";
+                    }
+                    const fullLogs = logs.join('\n') + metricsSection;
+                    shareFile(fullLogs, `debug-logs-${Date.now()}.txt`, 'text/plain');
+                  }}
                   className="p-2 hover:bg-zinc-800 rounded-full transition-colors text-zinc-400 hover:text-white"
-                  title="Скачать все логи (.txt)"
+                  title="Поделиться всеми логами"
                 >
-                  <Download size={20} />
+                  <Share2 size={20} />
                 </button>
                 <button 
                   onClick={() => setShowLogs(false)}
@@ -1585,12 +1622,12 @@ export default function Dashboard() {
                   <button 
                     onClick={() => {
                       const data = JSON.stringify(metricHistory, null, 2);
-                      downloadFile(data, `metrics-${Date.now()}.json`, 'application/json');
+                      shareFile(data, `metrics-${Date.now()}.json`, 'application/json');
                     }}
                     className="flex-1 min-w-[140px] py-3 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-400 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
                   >
-                    <SignalHigh size={16} />
-                    Скачать .json
+                    <Share2 size={16} />
+                    Поделиться .json
                   </button>
                   <button 
                     onClick={() => {
@@ -1600,12 +1637,12 @@ export default function Dashboard() {
                         const time = new Date(m.ts).toLocaleTimeString();
                         text += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
                       });
-                      downloadFile(text, `metrics-${Date.now()}.txt`, 'text/plain');
+                      shareFile(text, `metrics-${Date.now()}.txt`, 'text/plain');
                     }}
                     className="flex-1 min-w-[140px] py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 border border-zinc-700"
                   >
-                    <Download size={16} />
-                    Скачать .txt
+                    <Share2 size={16} />
+                    Поделиться .txt
                   </button>
                   <button 
                     onClick={() => showToast('Очищено — данные следующего звонка будут чистыми')}
@@ -1653,12 +1690,12 @@ export default function Dashboard() {
                   <span>Экспорт</span>
                 </button>
                 <button 
-                  onClick={() => downloadFile(logs.join('\n'), `system-log-${Date.now()}.log`, 'text/plain')}
+                  onClick={() => shareFile(logs.join('\n'), `system-log-${Date.now()}.log`, 'text/plain')}
                   className="flex-1 min-w-[110px] flex items-center justify-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-colors border border-zinc-700"
-                  title="Скачать системный журнал (.log)"
+                  title="Поделиться системным журналом"
                 >
-                  <Download size={14} />
-                  <span>Скачать .log</span>
+                  <Share2 size={14} />
+                  <span>Поделиться .log</span>
                 </button>
                 <button 
                   onClick={() => setLogs([])}
@@ -1691,14 +1728,24 @@ export default function Dashboard() {
             
             <div className="flex flex-col gap-3">
               <button 
-                onClick={() => {
-                  downloadAllLogs();
-                  // setShowPostCallSummary(false); // Keep open to allow multiple downloads if needed, or close? User said "download and that's it" usually.
+                onClick={async () => {
+                  let metricsSection = "\n\n=== CALL METRICS HISTORY ===\n";
+                  if (metricHistory.length > 0) {
+                    metricsSection += "Timestamp, RTT(ms), FPS, Bitrate(kbps), AI_State, Net_State\n";
+                    metricHistory.forEach(m => {
+                      const time = new Date(m.ts).toLocaleTimeString();
+                      metricsSection += `${time}, ${Math.round(m.rtt)}, ${Math.round(m.fps)}, ${Math.round(m.bitrate)}, ${m.ai || '?'}, ${m.state || '?'}\n`;
+                    });
+                  } else {
+                    metricsSection += "No metrics available.\n";
+                  }
+                  const fullLogs = logs.join('\n') + metricsSection;
+                  shareFile(fullLogs, `debug-logs-${Date.now()}.txt`, 'text/plain');
                 }}
                 className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 rounded-2xl flex items-center justify-center text-white font-bold transition-all shadow-lg shadow-emerald-500/20 gap-2"
               >
-                <Download size={20} />
-                Скачать логи (.txt)
+                <Share2 size={20} />
+                Отправить логи (Telegram/...)
               </button>
               
               <button 
