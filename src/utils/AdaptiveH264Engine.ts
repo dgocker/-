@@ -395,17 +395,17 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
-    // Phase 3: Higher RTT tolerance for mobile (1000ms instead of 600ms).
-    const isHighRtt = this.lastSmoothedRtt > 1000;
+    // Phase 4: Aggressive protection for slow devices. Trigger at 600ms.
+    const isHighRtt = this.lastSmoothedRtt > 600;
     const isOveruse = this.delayTrend > 25 || isBufferGrowing || isHighRtt;
 
     if (isOveruse) {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
-        // Dynamic cut factor
+        // Dynamic cut factor: Aggressive rescue for slow peers
         let cutFactor = 0.85;
-        if (this.lastSmoothedRtt > 1500) cutFactor = 0.6;
-        if (this.lastSmoothedRtt > 3000) cutFactor = 0.3;
+        if (this.lastSmoothedRtt > 600) cutFactor = 0.5; // Сразу режем битрейт в 2 раза при скачке пинга!
+        if (this.lastSmoothedRtt > 1000) cutFactor = 0.25; // Режем в 4 раза при жестком заторе!
 
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
@@ -711,7 +711,7 @@ export class AdaptiveH264Engine {
 
 
       // FIX: Увеличиваем толерантность буфера, чтобы он мог вместить хотя бы один полный I-кадр без паники
-      const maxWsBuffer = Math.max(32768, (this.targetBitrate / 8) * 2.5);
+      const maxWsBuffer = Math.max(65536, (this.targetBitrate / 8) * 4.0);
 
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
