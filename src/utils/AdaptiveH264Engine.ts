@@ -567,8 +567,11 @@ export class AdaptiveH264Engine {
   }
 
   public start() {
+
+
     if (this.isRunning) return;
     this.isRunning = true;
+    if (this.onLog) this.onLog(`🔥 ЗАПУСК ENGINE: ВЕРСИЯ С ANTI-DPI И MIN BITRATE 150k`);
     const now = performance.now();
     this.sessionStartTime = now;
     this.lastPacerRun = performance.now();
