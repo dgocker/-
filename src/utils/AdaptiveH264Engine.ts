@@ -664,8 +664,8 @@ export class AdaptiveH264Engine {
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
     // Watchdog for encoder freeze using native encodeQueueSize
-    // Watchdog for encoder freeze using native encodeQueueSize (Level 8: 25 frames)
-    if (this.encoder && this.encoder.encodeQueueSize > 25 && now - this.lastPendingReset > 1500) {
+    // Watchdog for encoder freeze using native encodeQueueSize (Level 12: 10 frames to break deadlock)
+    if (this.encoder && this.encoder.encodeQueueSize > 10 && now - this.lastPendingReset > 1500) {
       if (this.onLog) this.onLog(`🚨 Watchdog: Encoder internal queue stuck (${this.encoder.encodeQueueSize}). Force resetting...`);
       this.handleEncoderError();
       this.lastPendingReset = now;
@@ -795,8 +795,8 @@ export class AdaptiveH264Engine {
 
     let bytesSentThisTick = 0;
 
-    // 🎲 Burst Randomization: Расширенный лимит (16-24 КБ) для пропуска битрейта до 4-5 Мбит/с
-    const MAX_BYTES_PER_TICK = 16000 + Math.floor(Math.random() * 8000);
+    // 🎲 Burst Randomization: Лимит (8-12 КБ) за такт. Это пробьет VPN, но не убьет модем (~2.8 Мбит/с)
+    const MAX_BYTES_PER_TICK = 8000 + Math.floor(Math.random() * 4000);
 
     // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
     // Чтобы не рвать I-кадр на несколько секунд
