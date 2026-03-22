@@ -92,7 +92,6 @@ export class AdaptiveH264Engine {
 
   private isRunning: boolean = false;
   private lastFrameTime: number = 0;
-  private pendingFrames: number = 0;
   private rafId: number | null = null;
   private errorCount: number = 0;
   private isRecovering: boolean = false;
@@ -220,16 +219,14 @@ export class AdaptiveH264Engine {
         output: (chunk, metadata) => {
           const startTime = performance.now();
 
-          // ✅ ПРАВКА 1: Уменьшаем pendingFrames СРАЗУ! 
-          // Кодек свою работу сделал, он не виноват, если дальше шифрование займет время.
-          this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+          // Родной колбэк готовности кадра
+          this.lastEncodeTs = performance.now();
 
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
           // Task 17 Refined: Don't drop large I-frames. Raised to 1.5MB for 1080p high-quality.
           if (data.length > 1500000) {
             if (this.onLog) this.onLog(`\u26A0\uFE0F Frame too large (${Math.round(data.length / 1024)}KB), dropping`);
-            // Здесь больше не нужен this.pendingFrames--, мы сделали это выше
             return;
           }
           // Делегируем в отдельный метод, чтобы не блокировать поток энкодера
@@ -293,7 +290,6 @@ export class AdaptiveH264Engine {
   private handleEncoderError() {
     if (this.isRecovering) return;
     this.isRecovering = true;
-    this.pendingFrames = 0;
 
     setTimeout(async () => {
       try {
@@ -330,7 +326,6 @@ export class AdaptiveH264Engine {
       this.needsKeyframe = true;
 
       // ✅ ПРАВКА: Сбрасываем счетчики, так как аппаратный чип уничтожил старые кадры при реконфигурации
-      this.pendingFrames = 0;
       this.sendQueue = [];
       this.queueTotalBytes = 0;
       this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000);
@@ -421,13 +416,13 @@ export class AdaptiveH264Engine {
         stateChanged = true;
       }
     } else {
-      // Выход из пробки только если пинг упал ниже 400 и прошло 1.5 секунды
-      if (this.aiState === 'congested' && now - this.lastCongestionTs > 1500 && this.lastSmoothedRtt < 400) {
+      // Выход из пробки: учитываем мобильный пинг (до 800мс)
+      if (this.aiState === 'congested' && now - this.lastCongestionTs > 2000 && this.lastSmoothedRtt < 800) {
         this.aiState = 'steady';
         stateChanged = true;
       }
 
-      if (this.aiState === 'steady' && this.lastSmoothedRtt < 900) {
+      if (this.aiState === 'steady' && this.lastSmoothedRtt < 1200) {
         if (now - this.lastSteadyIncrease > 400) {
           // Phase 3: Exponential growth (+10%) to leverage 50Mbps links quickly
           const growth = this.targetBitrate * 0.10;
@@ -675,8 +670,9 @@ export class AdaptiveH264Engine {
     }
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
-    if (this.pendingFrames > 0 && now - this.lastPendingReset > 1500) {
-      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder stuck with ${this.pendingFrames} frames. Force resetting encoder...`);
+    // Watchdog for encoder freeze using native encodeQueueSize
+    if (this.encoder && this.encoder.encodeQueueSize > 15 && now - this.lastPendingReset > 1500) {
+      if (this.onLog) this.onLog(`🚨 Watchdog: Encoder internal queue stuck (${this.encoder.encodeQueueSize}). Force resetting...`);
       this.handleEncoderError();
       this.lastPendingReset = now;
     }
@@ -805,8 +801,8 @@ export class AdaptiveH264Engine {
 
     let bytesSentThisTick = 0;
 
-    // 🎲 Burst Randomization: Рандомизируем размер отправки за такт
-    const MAX_BYTES_PER_TICK = 32000 + Math.floor(Math.random() * 64000);
+    // 🎲 Burst Randomization: Мелкие порции (6-12 КБ), чтобы не забивать сокет и не убивать RTT
+    const MAX_BYTES_PER_TICK = 6000 + Math.floor(Math.random() * 6000);
 
     // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
     // Чтобы не рвать I-кадр на несколько секунд
@@ -828,18 +824,10 @@ export class AdaptiveH264Engine {
 
   private async processFrame(now: number): Promise<boolean> {
     if (this.onLog && this.frameId % 300 === 0) {
-      this.onLog(`🎬 processFrame: pending=${this.pendingFrames}, queue=${this.sendQueue.length}, state=${this.aiState}`);
+      this.onLog(`🎬 processFrame: eqSize=${this.encoder?.encodeQueueSize || 0}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    // FIX: Removed strict encoding skip (Task 30). 
-    // It was causing sudden FPS drops. Now we let the Pacer handle it via queue pruning.
-
-    const maxPending = 30;
-    if (this.pendingFrames > maxPending || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
-      if (this.onLog && this.frameId % 300 === 0 && this.pendingFrames > (maxPending - 2)) {
-        this.onLog(`⚠️ processFrame skipped: too many pending frames (${this.pendingFrames})`);
-      }
-
+    if ((this.encoder && this.encoder.encodeQueueSize > 5) || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       return false;
     }
     if (!this.encoder) {
@@ -879,14 +867,12 @@ export class AdaptiveH264Engine {
       }
 
       try {
-        this.pendingFrames++; // ✅ Инкремент ПЕРЕД попыткой кодирования
         this.encoder.encode(frame, { keyFrame: isKey });
         this.firstFrameFed = true;
         this.needsKeyframe = false;
         frame.close();
         return true;
       } catch (e) {
-        this.pendingFrames = Math.max(0, this.pendingFrames - 1); // Декремент при ошибке
         frame.close();
         return false;
       }
