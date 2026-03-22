@@ -394,18 +394,18 @@ export class AdaptiveH264Engine {
     let stateChanged = false;
     const oldBitrate = this.targetBitrate;
 
-    const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
-    // Phase 5: Mobile-optimized RTT thresholds. 700ms is normal for 4G.
-    const isHighRtt = this.lastSmoothedRtt > 700;
-    const isOveruse = this.delayTrend > 25 || isBufferGrowing || isHighRtt;
+    // СТАЛО: (Разрешаем локальному буферу раздуваться до 150 КБ во время VPN-выстрелов)
+    const isHighRtt = this.lastSmoothedRtt > 800; // Паникуем только если пинг реально улетел
+    const isBufferMassive = buffered > Math.max(150000, (this.targetBitrate / 8) * 2.0);
+    const isOveruse = isHighRtt || isBufferMassive;
 
     if (isOveruse) {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
-        // Dynamic cut factor: Realistic mobile thresholds
-        let cutFactor = 0.85;
-        if (this.lastSmoothedRtt > 1000) cutFactor = 0.5; // Сдвигаем на 1000мс
-        if (this.lastSmoothedRtt > 1500) cutFactor = 0.25; // Сдвигаем на 1500мс
+        // СТАЛО: (Мягко спускаем скорость, если VPN захлебнулся)
+        let cutFactor = 0.9; 
+        if (this.lastSmoothedRtt > 1000) cutFactor = 0.75; 
+        if (this.lastSmoothedRtt > 1500) cutFactor = 0.50; 
 
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
