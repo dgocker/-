@@ -727,7 +727,7 @@ export class AdaptiveH264Engine {
         this.droppedFramesConsecutive++;
 
         // Запрашиваем новый Keyframe только если мы не в кулдауне
-        if (this.droppedFramesConsecutive >= 3 && now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
+        if (this.droppedFramesConsecutive >= 2 && now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
           this.needsKeyframe = true;
         }
 

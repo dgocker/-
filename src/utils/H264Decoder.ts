@@ -60,11 +60,6 @@ export class H264Decoder {
         output: (frame) => {
           let angle = this.rotation;
 
-          // Attempt 9: Always Vertical Fix
-          if (angle === 0 && frame.displayWidth > frame.displayHeight) {
-            angle = 90;
-          }
-
           const isRotated = angle === 90 || angle === 270;
           const displayW = isRotated ? frame.displayHeight : frame.displayWidth;
           const displayH = isRotated ? frame.displayWidth : frame.displayHeight;
@@ -165,10 +160,10 @@ export class H264Decoder {
         const sorted = [...this.jitterLog].sort((a, b) => a - b);
         const p95 = sorted[Math.floor(sorted.length * 0.95)]; // Берем 95-й перцентиль
 
-        const multiplier = /Android/i.test(navigator.userAgent) ? 1.8 : 1.3;
+        const multiplier = /Android/i.test(navigator.userAgent) ? 2.5 : 1.5; // Увеличиваем запас хода для Android
         
         // Используем именно p95 для локального буфера, чтобы глотать скачки
-        const newTarget = Math.min(800, Math.max(this.MIN_DELAY, this.estimatedOneWay + 40 + (p95 * multiplier)));
+        const newTarget = Math.min(1200, Math.max(this.MIN_DELAY, this.estimatedOneWay + 60 + (p95 * multiplier)));
         this.targetDelay = this.targetDelay * 0.95 + newTarget * 0.05;
       }
     }
