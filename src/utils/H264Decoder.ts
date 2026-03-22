@@ -225,8 +225,8 @@ export class H264Decoder {
     const lastPacket = this.jitterBuffer[this.jitterBuffer.length - 1];
     const bufferDuration = lastPacket.senderTs - firstPacket.senderTs;
 
-    // Phase 3: Relaxed jump threshold (3500ms) to allow more jitter on 4G/5G.
-    if (bufferDuration > 3500 || this.jitterBuffer.length > 60) {
+    // Phase 3: Relaxed jump threshold (5000ms) to allow more jitter on 4G/5G.
+    if (bufferDuration > 5000 || this.jitterBuffer.length > 90) {
       let latestKeyIdx = -1;
       for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
         if (this.jitterBuffer[i].type === 'key') {
@@ -241,7 +241,7 @@ export class H264Decoder {
         this.firstSenderTs = -1;
         requestAnimationFrame(this.playNext);
         return;
-      } else if (latestKeyIdx === -1 && bufferDuration > 4000) {
+      } else if (latestKeyIdx === -1 && bufferDuration > 5500) {
         if (this.onLog) this.onLog(`\u23E9 Panic Reset: NO KEYFRAME IN BUFFER. Dropping all ${this.jitterBuffer.length} frames (duration=${bufferDuration}ms).`);
         this.jitterBuffer = [];
         this.firstSenderTs = -1;

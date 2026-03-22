@@ -325,12 +325,8 @@ export class AdaptiveH264Engine {
       this.isConfigured = true;
       this.needsKeyframe = true;
 
-      // ✅ ПРАВКА: Сбрасываем счетчики, так как аппаратный чип уничтожил старые кадры при реконфигурации
-      this.sendQueue = [];
-      this.queueTotalBytes = 0;
-      this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000);
-
-      if (this.onLog) this.onLog(`⚙️ Baseline Config: ${width}x${height} @ ${Math.round(this.targetBitrate / 1024)}k (Queue Flush + Boost)`);
+      // ✅ ПРАВКА: Очередь НЕ сбрасываем, чтобы не терять летящие данные при подстройке битрейта
+      if (this.onLog) this.onLog(`⚙️ Baseline Config: ${width}x${height} @ ${Math.round(this.targetBitrate / 1024)}k (Persistent Queue + Boost)`);
     } catch (e) {
       if (this.onLog) this.onLog(`\u274C Encoder configuration failed: ${e}`);
     }
@@ -416,13 +412,13 @@ export class AdaptiveH264Engine {
         stateChanged = true;
       }
     } else {
-      // Выход из пробки: учитываем мобильный пинг (до 800мс)
-      if (this.aiState === 'congested' && now - this.lastCongestionTs > 2000 && this.lastSmoothedRtt < 800) {
+      // Выход из пробки: учитываем мобильный пинг (до 1500мс)
+      if (this.aiState === 'congested' && now - this.lastCongestionTs > 2000 && this.lastSmoothedRtt < 1500) {
         this.aiState = 'steady';
         stateChanged = true;
       }
 
-      if (this.aiState === 'steady' && this.lastSmoothedRtt < 1200) {
+      if (this.aiState === 'steady' && this.lastSmoothedRtt < 2000) {
         if (now - this.lastSteadyIncrease > 400) {
           // Phase 3: Exponential growth (+10%) to leverage 50Mbps links quickly
           const growth = this.targetBitrate * 0.10;
@@ -792,8 +788,8 @@ export class AdaptiveH264Engine {
 
     const maxPacerBurst = Math.max(15000, currentBytesPerMs * 40);
 
-    // ✅ ДАЕМ ПЕЙСЕРУ ДЫШАТЬ ПОСЛЕ I-FRAMES (Долг до 100 КБ)
-    const maxPacerDebt = -100000;
+    // ✅ ДАЕМ ПЕЙСЕРУ ДЫШАТЬ ПОСЛЕ I-FRAMES (Долг до 200 КБ)
+    const maxPacerDebt = -200000;
 
     if (this.pacerTokens > maxPacerBurst) {
       this.pacerTokens = maxPacerBurst;
@@ -806,7 +802,7 @@ export class AdaptiveH264Engine {
 
     // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
     // Чтобы не рвать I-кадр на несколько секунд
-    while (this.sendQueue.length > 0 && (this.pacerTokens > -60000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+    while (this.sendQueue.length > 0 && (this.pacerTokens > -200000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const packet = this.sendQueue.shift()!;
       this.queueTotalBytes -= packet.data.byteLength;
       this.ws.send(packet.data);
