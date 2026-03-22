@@ -751,10 +751,13 @@ export class AdaptiveH264Engine {
       this.framesProcessedThisSecond = 0;
       this.droppedFramesRate = this.droppedFramesWindow;
       this.droppedFramesWindow = 0;
-      this.droppedWindowStart = now;
 
-      const kbps = Math.round((this.bytesSentThisSecond * 8) / 1024);
+      // ✅ ИСПРАВЛЕННЫЙ РАСЧЕТ СКОРОСТИ:
+      const durationSec = (now - this.droppedWindowStart) / 1000;
+      const kbps = Math.round(((this.bytesSentThisSecond * 8) / 1024) / durationSec);
+
       this.bytesSentThisSecond = 0;
+      this.droppedWindowStart = now; // Таймер сбрасываем ПОСЛЕ расчета
 
       if (this.onLog && this.isRunning) {
         this.onLog(`📤 Send rate: ${kbps} kbps, buffer: ${this.sendQueue.length} frames (${Math.round(this.queueTotalBytes / 1024)}KB), tokens=${Math.round(this.tokenBucketBytes / 1024)}KB`);
@@ -768,49 +771,63 @@ export class AdaptiveH264Engine {
     const deltaMs = now - this.lastPacerTick;
     this.lastPacerTick = now;
 
-    if (deltaMs <= 0) return;
+    if (deltaMs <= 0 || !this.ws || this.ws.readyState !== 1) return;
 
     const bytesPerMs = (this.targetBitrate / 8) / 1000;
     let currentBytesPerMs = bytesPerMs;
 
-    // 🚀 АНТИ-УДУШЬЕ СОХРАНЕНО (Dynamic Boost)
-    if (this.sendQueue.length > 20) currentBytesPerMs = bytesPerMs * 1.5;
-    if (this.sendQueue.length > 50) currentBytesPerMs = bytesPerMs * 3.0;
-    if (this.sendQueue.length > 100) currentBytesPerMs = bytesPerMs * 5.0;
+    // 🚀 СИМБИОЗ: Интеллектуальный Форсаж
+    // Если в JS-памяти скопилась очередь (пришел I-кадр), разрешаем Пейсеру газовать до 12 Мбит/с
+    if (this.sendQueue.length > 15) currentBytesPerMs = bytesPerMs * 2.0;
+    if (this.sendQueue.length > 40) currentBytesPerMs = bytesPerMs * 5.0;
+    if (this.sendQueue.length > 80) currentBytesPerMs = bytesPerMs * 10.0;
 
-    // ✅ ПРЕДОХРАНИТЕЛЬ ОТ 10-СЕКУНДНОЙ ЗАДЕРЖКИ (Ограничиваем Форсаж)
-    currentBytesPerMs = Math.min(currentBytesPerMs, 875);
+    // Потолок скорости перекладывания данных в сокет (~1.5 МБ/сек или 12 Мбит)
+    currentBytesPerMs = Math.min(currentBytesPerMs, 1500);
 
     const tokensPerTick = currentBytesPerMs * deltaMs;
     this.pacerTokens += tokensPerTick;
 
-    const maxPacerBurst = Math.max(15000, currentBytesPerMs * 40);
-
-    // ✅ ДАЕМ ПЕЙСЕРУ ДЫШАТЬ ПОСЛЕ I-FRAMES (Долг до 200 КБ)
-    const maxPacerDebt = -200000;
-
+    // Лимиты накопления: позволяем накопить токены на один жирный I-кадр (60 КБ)
+    const maxPacerBurst = Math.max(60000, currentBytesPerMs * 40);
     if (this.pacerTokens > maxPacerBurst) {
       this.pacerTokens = maxPacerBurst;
     }
 
     let bytesSentThisTick = 0;
+    // Лимит на один такт (24 КБ), чтобы не блокировать Event Loop надолго
+    const MAX_BYTES_PER_TICK = 16000 + Math.floor(Math.random() * 8000);
 
-    // 🎲 Burst Randomization: Лимит (8-12 КБ) за такт. Это пробьет VPN, но не убьет модем (~2.8 Мбит/с)
-    const MAX_BYTES_PER_TICK = 8000 + Math.floor(Math.random() * 4000);
+    // 💎 ЭФФЕКТИВНОСТЬ: Лимит долга -250 000 байт.
+    // Это позволяет огромному кадру пролететь за доли секунды без остановки Пейсера.
+    const maxPacerDebt = -250000;
 
-    // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
-    // Чтобы не рвать I-кадр на несколько секунд
-    while (this.sendQueue.length > 0 && (this.pacerTokens > -200000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+    while (this.sendQueue.length > 0 && (this.pacerTokens > maxPacerDebt) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+
+      // ✅ АППАРАТНЫЙ ВЕНТИЛЬ: Если сокет забит на 100 КБ — Форсаж отключается.
+      // Ждем, пока модем телефона протолкнет данные в сеть.
+      if (this.ws.bufferedAmount > 102400) {
+        break;
+      }
+
       const packet = this.sendQueue.shift()!;
       this.queueTotalBytes -= packet.data.byteLength;
-      this.ws.send(packet.data);
-      this.pacerTokens -= packet.data.length;
-      bytesSentThisTick += packet.data.length;
 
-      // Не забываем счетчик для логов
-      this.bytesSentThisSecond += packet.data.length;
+      // 🛡️ НАДЕЖНОСТЬ: Защита от внезапного обрыва сокета во время итерации
+      try {
+        this.ws.send(packet.data);
+
+        this.pacerTokens -= packet.data.length;
+        bytesSentThisTick += packet.data.length;
+        this.bytesSentThisSecond += packet.data.length;
+      } catch (e) {
+        if (this.onLog) this.onLog(`⚠️ Socket send error: ${e}. Dropping packet.`);
+        // Если сокет "умер", выходим из цикла, чтобы не тратить CPU
+        break;
+      }
     }
 
+    // Жесткое ограничение долга, чтобы Пейсер не замолчал на вечность после гигантского выброса
     if (this.pacerTokens < maxPacerDebt) {
       this.pacerTokens = maxPacerDebt;
     }
