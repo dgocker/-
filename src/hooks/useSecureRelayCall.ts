@@ -82,9 +82,9 @@ export function useSecureRelayCall(
 
       socketRef.current?.emit('media_control', {
         roomId: currentRoomIdRef.current,
-        payload: { 
-          type: 'pong', 
-          ts: msg.ts, 
+        payload: {
+          type: 'pong',
+          ts: msg.ts,
           sid: msg.sid,
           jitter: currentJitter
         }
@@ -96,7 +96,7 @@ export function useSecureRelayCall(
       const rtt = Math.max(0, performance.now() - msg.ts);
       rttRef.current = rtt;
       setStats(prev => ({ ...prev, rtt }));
-      
+
       if (adaptiveEngineRef.current) {
         adaptiveEngineRef.current.updateRTT(rtt);
         if (msg.jitter !== undefined) {
@@ -250,6 +250,11 @@ export function useSecureRelayCall(
     addLog('🧹 Cleaning up call resources...');
     isCleanedUpRef.current = true;
 
+    if ((window as any)._chaffInterval) {
+      clearInterval((window as any)._chaffInterval);
+      (window as any)._chaffInterval = null;
+    }
+
     if (fragmentCleanupInterval.current) {
       clearInterval(fragmentCleanupInterval.current);
       fragmentCleanupInterval.current = null;
@@ -341,7 +346,7 @@ export function useSecureRelayCall(
     // Мощный рандомный паддинг для аудио (от 0 до 400 байт), чтобы убить размерную сигнатуру
     const paddingSize = Math.floor(Math.random() * 400);
 
-    const totalSize = 10 + originalSize + paddingSize; 
+    const totalSize = 10 + originalSize + paddingSize;
     const paddedBuffer = new ArrayBuffer(totalSize);
     const paddedView = new DataView(paddedBuffer);
     const paddedUint8 = new Uint8Array(paddedBuffer);
@@ -350,7 +355,7 @@ export function useSecureRelayCall(
     const salt = 50 + Math.floor(Math.random() * 40);
     paddedUint8[0] = salt;
     paddedUint8[1] = type ^ salt;
-    
+
     // Записываем размер и TS
     paddedView.setUint32(2, originalSize, true);
     paddedView.setUint32(6, senderTs, true);
@@ -372,7 +377,7 @@ export function useSecureRelayCall(
     const paddedUint8 = new Uint8Array(paddedBuffer);
     const salt = paddedUint8[0];
     const type = paddedUint8[1] ^ salt;
-    
+
     // Копируем заголовок для безопасного снятия XOR
     const headerCopy = new Uint8Array(paddedBuffer.slice(0, 10));
     headerCopy[2] ^= salt; headerCopy[3] ^= salt; headerCopy[4] ^= salt; headerCopy[5] ^= salt;
@@ -381,7 +386,7 @@ export function useSecureRelayCall(
     const paddedView = new DataView(headerCopy.buffer);
     const originalSize = paddedView.getUint32(2, true);
     const senderTs = paddedView.getUint32(6, true);
-    
+
     return {
       data: paddedBuffer.slice(10, 10 + originalSize),
       type,
@@ -778,7 +783,7 @@ export function useSecureRelayCall(
           const dummySize = 50 + Math.floor(Math.random() * 300);
           const dummy = new Uint8Array(dummySize);
           crypto.getRandomValues(dummy);
-          
+
           dummy[0] = 10 + Math.floor(Math.random() * 30); // FIX: Соль шума от 10 до 40
           ws.send(dummy);
         }
@@ -930,11 +935,11 @@ export function useSecureRelayCall(
         // 3. ПРОВЕРЯЕМ ВИДЕО - Соль от 100 до 250
         if (part[0] >= 100 && part[0] <= 250) {
           const salt = part[0];
-          
+
           // Снимаем XOR чтобы узнать frameId и totalParts "на лету"
           const frameId = (part[1] ^ salt) | ((part[2] ^ salt) << 8);
           const totalParts = (part[9] ^ salt) | ((part[10] ^ salt) << 8);
-          
+
           if (!obfBufferRef.current[frameId]) {
             obfBufferRef.current[frameId] = [];
             (obfBufferRef.current[frameId] as any).timestamp = Date.now();
@@ -1015,11 +1020,11 @@ export function useSecureRelayCall(
         // 3. ПРОВЕРЯЕМ ВИДЕО - Соль от 100 до 250
         if (part[0] >= 100 && part[0] <= 250) {
           const salt = part[0];
-          
+
           // Снимаем XOR чтобы узнать frameId и totalParts "на лету"
           const frameId = (part[1] ^ salt) | ((part[2] ^ salt) << 8);
           const totalParts = (part[9] ^ salt) | ((part[10] ^ salt) << 8);
-          
+
           if (!obfBufferRef.current[frameId]) {
             obfBufferRef.current[frameId] = [];
             (obfBufferRef.current[frameId] as any).timestamp = Date.now();
