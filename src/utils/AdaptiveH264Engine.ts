@@ -122,9 +122,8 @@ export class AdaptiveH264Engine {
   private targetBitrate: number = 600_000;
   private lastConfiguredBitrate: number = 0;
   private lastConfiguredTs: number = 0;
-  // Возвращаем 60к, чтобы сеть могла "дышать" на EDGE/3G.
-  // При битрейте < 120k FPS упадет до 5, и энкодер аппаратно не сможет сгенерировать больше данных, даже если его внутренний лимит 150к.
-  private minBitrate: number = 60_000;
+  // Жесткий лимит безопасности для аппаратных энкодеров Apple/Android
+  private minBitrate: number = 150_000;
   private maxBitrate: number = 3_000_000; // Raised for 50Mbps support
   private tokenBucketBytes: number = (500_000 / 8) * 0.2;
   private lastTokenUpdate: number = performance.now();
@@ -713,24 +712,29 @@ export class AdaptiveH264Engine {
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
 
-      const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 1.5);
+      // FIX: Увеличиваем толерантность буфера, чтобы он мог вместить хотя бы один полный I-кадр без паники
+      const maxWsBuffer = Math.max(32768, (this.targetBitrate / 8) * 2.5);
+
       if (bufferedAmount > maxWsBuffer || isInternalQueuePanic) {
         this.droppedFrames++;
         this.droppedFramesWindow++;
         this.droppedFramesConsecutive++;
 
-        // FIX: Only request keyframe if NOT in cooldown
+        // Запрашиваем новый Keyframe только если мы не в кулдауне
         if (this.droppedFramesConsecutive >= 3 && now - this.lastKeyframeSentTs > this.KEYFRAME_COOLDOWN) {
           this.needsKeyframe = true;
         }
 
         if ((isInternalQueuePanic || bufferedAmount > maxWsBuffer * 1.5) && now - this.lastCongestionTs > this.congestionCooldown) {
           if (this.onLog) {
-            this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, wsBuf=${Math.round(bufferedAmount / 1024)}KB, soft reset!`);
+            this.onLog(`🚨 Congestion Panic: qLen=${this.sendQueue.length}, wsBuf=${Math.round(bufferedAmount / 1024)}KB. Slashing bitrate!`);
           }
-          this.sendQueue = [];
-          this.tokenBucketBytes = 20000; // Reset debt! (Task 23)
-          this.pacerTokens = 20000; // Give pacer a boost too
+
+          // ❌ УДАЛЕНО: this.sendQueue = []; <-- ЭТО УБИВАЛО КАДРЫ!
+          // Оставляем очередь в покое, Пейсер сам её разгребет.
+
+          this.tokenBucketBytes = 20000;
+          // Режем битрейт для БУДУЩИХ кадров, чтобы разгрузить сеть
           this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.5);
           this.applyBitrateToParams();
           this.aiState = 'congested';
