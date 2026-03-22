@@ -219,7 +219,7 @@ export class AdaptiveH264Engine {
       this.encoder = new VideoEncoder({
         output: (chunk, metadata) => {
           const startTime = performance.now();
-          
+
           // ✅ ПРАВКА 1: Уменьшаем pendingFrames СРАЗУ! 
           // Кодек свою работу сделал, он не виноват, если дальше шифрование займет время.
           this.pendingFrames = Math.max(0, this.pendingFrames - 1);
@@ -776,19 +776,24 @@ export class AdaptiveH264Engine {
     if (this.sendQueue.length > 50) currentBytesPerMs = bytesPerMs * 3.0;
     if (this.sendQueue.length > 100) currentBytesPerMs = bytesPerMs * 5.0;
 
+    // ✅ ПРЕДОХРАНИТЕЛЬ ОТ 10-СЕКУНДНОЙ ЗАДЕРЖКИ (Ограничиваем Форсаж)
+    currentBytesPerMs = Math.min(currentBytesPerMs, 875);
+
     const tokensPerTick = currentBytesPerMs * deltaMs;
     this.pacerTokens += tokensPerTick;
 
     const maxPacerBurst = Math.max(15000, currentBytesPerMs * 40);
-    const maxPacerDebt = -3000;
+
+    // ✅ ДАЕМ ПЕЙСЕРУ ДЫШАТЬ ПОСЛЕ I-FRAMES (Долг до 100 КБ)
+    const maxPacerDebt = -100000;
 
     if (this.pacerTokens > maxPacerBurst) {
       this.pacerTokens = maxPacerBurst;
     }
 
     let bytesSentThisTick = 0;
-    
-    // 🎲 Burst Randomization: Рандомизируем размер отправки за такт, но в рамках доступных токенов
+
+    // 🎲 Burst Randomization: Рандомизируем размер отправки за такт
     const MAX_BYTES_PER_TICK = 32000 + Math.floor(Math.random() * 64000);
 
     while (this.sendQueue.length > 0 && this.pacerTokens > 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
@@ -796,7 +801,7 @@ export class AdaptiveH264Engine {
       this.ws.send(packet.data);
       this.pacerTokens -= packet.data.length;
       bytesSentThisTick += packet.data.length;
-      
+
       // Не забываем счетчик для логов
       this.bytesSentThisSecond += packet.data.length;
     }
