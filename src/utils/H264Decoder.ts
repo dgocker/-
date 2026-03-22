@@ -230,8 +230,8 @@ export class H264Decoder {
     const lastPacket = this.jitterBuffer[this.jitterBuffer.length - 1];
     const bufferDuration = lastPacket.senderTs - firstPacket.senderTs;
 
-    // Phase 3: Relaxed jump threshold (800ms) to allow more jitter on 4G/5G.
-    if (bufferDuration > 800 || this.jitterBuffer.length > 45) {
+    // Phase 3: Relaxed jump threshold (2000ms) to allow more jitter on 4G/5G.
+    if (bufferDuration > 2000 || this.jitterBuffer.length > 60) {
       let latestKeyIdx = -1;
       for (let i = this.jitterBuffer.length - 1; i >= 0; i--) {
         if (this.jitterBuffer[i].type === 'key') {

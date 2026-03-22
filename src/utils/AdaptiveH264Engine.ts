@@ -354,15 +354,15 @@ export class AdaptiveH264Engine {
     const kbps = this.targetBitrate / 1024;
 
     // ✅ ИСПРАВЛЕНИЕ: Добавляем "гистерезис" (запас хода), 
-    // чтобы разрешение не прыгало туда-сюда при битрейте вокруг 200kbps.
-    if (kbps < 180) {
+    // чтобы разрешение не прыгало туда-сюда при битрейте вокруг пороговых значений.
+    if (kbps < 300) {
       this.currentFps = 15; 
       this.currentScale = 0.5; // Уверенно плохая сеть -> 360p
-    } else if (kbps > 250) {
+    } else if (kbps > 600) {
       this.currentFps = 30;
       this.currentScale = 1.0; // Уверенно хорошая сеть -> 720p
     }
-    // Если kbps болтается между 180 и 250, МЫ НИЧЕГО НЕ МЕНЯЕМ. 
+    // Если kbps болтается между 300 и 600, МЫ НИЧЕГО НЕ МЕНЯЕМ. 
     // Остается тот масштаб, который был. Это спасет iPhone от зависания.
 
     // Применяем настройки только если битрейт изменился значимо (40%) или масштаб изменился
@@ -807,7 +807,9 @@ export class AdaptiveH264Engine {
     // 🎲 Burst Randomization: Рандомизируем размер отправки за такт
     const MAX_BYTES_PER_TICK = 32000 + Math.floor(Math.random() * 64000);
 
-    while (this.sendQueue.length > 0 && this.pacerTokens > 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+    // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
+    // Чтобы не рвать I-кадр на несколько секунд
+    while (this.sendQueue.length > 0 && (this.pacerTokens > -10000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const packet = this.sendQueue.shift()!;
       this.ws.send(packet.data);
       this.pacerTokens -= packet.data.length;
@@ -874,12 +876,17 @@ export class AdaptiveH264Engine {
         this.lastKeyframeSentTs = now;
       }
 
-      this.pendingFrames++;
-      this.encoder.encode(frame, { keyFrame: isKey });
-      this.firstFrameFed = true; // Устанавливаем флаг строго синхронно!
-      this.needsKeyframe = false;
-      frame.close();
-      return true;
+      try {
+        this.encoder.encode(frame, { keyFrame: isKey });
+        this.pendingFrames++; // ✅ Инкремент только если encode не упал
+        this.firstFrameFed = true;
+        this.needsKeyframe = false;
+        frame.close();
+        return true;
+      } catch (e) {
+        frame.close();
+        return false;
+      }
     } catch (e) {
       return false;
     }
