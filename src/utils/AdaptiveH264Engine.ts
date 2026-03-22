@@ -347,22 +347,23 @@ export class AdaptiveH264Engine {
 
     // FIX: I-Frame Storm & Encoder Hang Mitigation (Task 25).
     // Changing resolutions forces huge I-Frames and can hang Android hardware.
-    // Enforce 2s cooldown for any re-configuration.
+    // Даем энкодеру минимум 3 секунды на то, чтобы прийти в себя после смены качества
     const now = performance.now();
-    if (!force && now - this.lastConfiguredTs < 2000) return;
+    if (!force && now - this.lastConfiguredTs < 3000) return;
 
     const kbps = this.targetBitrate / 1024;
 
-    // Динамическое понижение FPS и разрешения при экстремальном падении
-    // FIX: Убрана агрессивная нарезка FPS до 5-10, которая делала слайд-шоу. 
-    // FIX: Убрана частая смена currentScale, из-за которой намертво зависал энкодер на iPhone.
-    if (kbps < 200) {
-      this.currentFps = 15; // Минимально комфортный FPS, никаких 5 кадров.
-      this.currentScale = 0.5; // Снижаем разрешение только в самом крайнем случае
-    } else {
+    // ✅ ИСПРАВЛЕНИЕ: Добавляем "гистерезис" (запас хода), 
+    // чтобы разрешение не прыгало туда-сюда при битрейте вокруг 200kbps.
+    if (kbps < 180) {
+      this.currentFps = 15; 
+      this.currentScale = 0.5; // Уверенно плохая сеть -> 360p
+    } else if (kbps > 250) {
       this.currentFps = 30;
-      this.currentScale = 1.0; // Держим нативное разрешение
+      this.currentScale = 1.0; // Уверенно хорошая сеть -> 720p
     }
+    // Если kbps болтается между 180 и 250, МЫ НИЧЕГО НЕ МЕНЯЕМ. 
+    // Остается тот масштаб, который был. Это спасет iPhone от зависания.
 
     // Применяем настройки только если битрейт изменился значимо (40%) или масштаб изменился
     const diffRatio = Math.abs(this.targetBitrate - this.lastConfiguredBitrate) / (this.lastConfiguredBitrate || 1);
