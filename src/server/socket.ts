@@ -147,7 +147,7 @@ export function setupSocket(io: Server) {
       const { roomId, payload } = data;
       // Пересылаем служебные команды (ping, pong, requestKeyframe, rotation) всем остальным в комнате
       if (roomId) {
-        socket.to(roomId).emit('media_control', { 
+        socket.broadcast.to(roomId).emit('media_control', { 
           fromSocketId: socket.id, 
           payload 
         });
@@ -157,7 +157,7 @@ export function setupSocket(io: Server) {
     socket.on('rotation', (data) => {
        const { roomId, angle } = data;
        if (roomId) {
-         socket.to(roomId).emit('rotation', { angle });
+         socket.broadcast.to(roomId).emit('rotation', { angle });
        }
     });
 

@@ -328,6 +328,9 @@ export class AdaptiveH264Engine {
       this.isConfigured = true;
       this.needsKeyframe = true;
 
+      // ✅ ПРАВКА: Сбрасываем счетчик, так как аппаратный чип уничтожил старые кадры при реконфигурации
+      this.pendingFrames = 0;
+
       // ДОБАВИТЬ СБРОС СТАРЫХ КАДРОВ:
       if (this.sendQueue.length > 0) {
         this.sendQueue = [];
@@ -688,7 +691,7 @@ export class AdaptiveH264Engine {
 
       // FIX: Умный сброс очереди. Нельзя делать slice массива фрагментов, это ломает H.264 кадр!
       // Если очередь слишком большая, сбрасываем её полностью
-      if (this.sendQueue.length > 500) {
+      if (this.sendQueue.length > 2000) {
         if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
 
         this.sendQueue = []; // Очищаем полностью
@@ -705,7 +708,7 @@ export class AdaptiveH264Engine {
         }
       }
 
-      const isInternalQueuePanic = this.sendQueue.length > 200 || queueBytes > 5120000;
+      const isInternalQueuePanic = this.sendQueue.length > 2000 || queueBytes > 5120000;
 
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
