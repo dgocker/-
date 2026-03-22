@@ -571,8 +571,8 @@ export function useSecureRelayCall(
           return;
         }
 
-        // FIX: Jitter. Сдвигаем отправку на 0-25мс, чтобы сломать аппаратный ритм микрофона
-        const jitterDelay = Math.floor(Math.random() * 25);
+        // FIX: Jitter. Сдвигаем отправку на 0-15мс, чтобы сломать аппаратный ритм микрофона
+        const jitterDelay = Math.floor(Math.random() * 15);
         setTimeout(() => {
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(addPadding(finalBuffer, 3, senderTs));

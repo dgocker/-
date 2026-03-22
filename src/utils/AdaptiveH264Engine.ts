@@ -131,6 +131,7 @@ export class AdaptiveH264Engine {
   private sessionStartTime: number = performance.now();
 
   private sendQueue: { data: Uint8Array; enqueueTime: number }[] = [];
+  private queueTotalBytes: number = 0;
   private frameId: number = 0;
   private timerId: any = null; // Support for setInterval
   private droppedFrames: number = 0;
@@ -278,6 +279,7 @@ export class AdaptiveH264Engine {
           data: new Uint8Array(part),
           enqueueTime: performance.now()
         });
+        this.queueTotalBytes += part.byteLength;
       }
 
       this.encodeDurationLog.push(performance.now() - startTime);
@@ -327,13 +329,10 @@ export class AdaptiveH264Engine {
       this.isConfigured = true;
       this.needsKeyframe = true;
 
-      // ✅ ПРАВКА: Сбрасываем счетчик, так как аппаратный чип уничтожил старые кадры при реконфигурации
+      // ✅ ПРАВКА: Сбрасываем счетчики, так как аппаратный чип уничтожил старые кадры при реконфигурации
       this.pendingFrames = 0;
-
-      // ДОБАВИТЬ СБРОС СТАРЫХ КАДРОВ:
-      if (this.sendQueue.length > 0) {
-        this.sendQueue = [];
-      }
+      this.sendQueue = [];
+      this.queueTotalBytes = 0;
       this.tokenBucketBytes = Math.max(this.tokenBucketBytes, 40000);
 
       if (this.onLog) this.onLog(`⚙️ Baseline Config: ${width}x${height} @ ${Math.round(this.targetBitrate / 1024)}k (Queue Flush + Boost)`);
@@ -347,18 +346,18 @@ export class AdaptiveH264Engine {
 
     // FIX: I-Frame Storm & Encoder Hang Mitigation (Task 25).
     // Changing resolutions forces huge I-Frames and can hang Android hardware.
-    // Даем энкодеру минимум 3 секунды на то, чтобы прийти в себя после смены качества
+    // ✅ ИСПРАВЛЕНИЕ: Добавляем "гистерезис" (запас хода), 
+    // чтобы разрешение не прыгало туда-сюда при битрейте вокруг пороговых значений.
+    // Даем энкодеру минимум 4 секунды на то, чтобы прийти в себя после смены качества
     const now = performance.now();
-    if (!force && now - this.lastConfiguredTs < 3000) return;
+    if (!force && now - this.lastConfiguredTs < 4000) return;
 
     const kbps = this.targetBitrate / 1024;
 
-    // ✅ ИСПРАВЛЕНИЕ: Добавляем "гистерезис" (запас хода), 
-    // чтобы разрешение не прыгало туда-сюда при битрейте вокруг пороговых значений.
-    if (kbps < 300) {
+    if (kbps < 250) {
       this.currentFps = 15; 
       this.currentScale = 0.5; // Уверенно плохая сеть -> 360p
-    } else if (kbps > 600) {
+    } else if (kbps > 800) {
       this.currentFps = 30;
       this.currentScale = 1.0; // Уверенно хорошая сеть -> 720p
     }
@@ -533,6 +532,7 @@ export class AdaptiveH264Engine {
     if (this.manualMode) {
       // Safe transition: reset everything before re-configuring
       this.sendQueue = [];
+      this.queueTotalBytes = 0;
       this.tokenBucketBytes = 0;
       this.targetBitrate = Math.min(bitrate, this.maxBitrate);
 
@@ -602,6 +602,7 @@ export class AdaptiveH264Engine {
   public async stop() {
     this.isRunning = false;
     this.sendQueue = [];
+    this.queueTotalBytes = 0;
     if (this.timerId) {
       clearInterval(this.timerId);
       this.timerId = null;
@@ -698,6 +699,7 @@ export class AdaptiveH264Engine {
         if (this.onLog) this.onLog(`🚨 Queue panic: queue too large (${this.sendQueue.length} parts). Soft reset.`);
 
         this.sendQueue = []; // Очищаем полностью
+        this.queueTotalBytes = 0;
         this.pacerTokens = Math.max(0, this.pacerTokens); // Сбрасываем долг пейсера, чтобы сразу слать
 
         // Режем битрейт не так радикально (на 30%, а не на 50%)
@@ -711,7 +713,7 @@ export class AdaptiveH264Engine {
         }
       }
 
-      const isInternalQueuePanic = this.sendQueue.length > 2000 || queueBytes > 5120000;
+      const isInternalQueuePanic = this.sendQueue.length > 2000 || this.queueTotalBytes > 5120000;
 
       // Resolution scaling based on bitrate is now handled in applyBitrateToParams
 
@@ -765,8 +767,7 @@ export class AdaptiveH264Engine {
       this.bytesSentThisSecond = 0;
 
       if (this.onLog && this.isRunning) {
-        const queueBytes = this.sendQueue.reduce((acc, q) => acc + q.data.length, 0);
-        this.onLog(`📤 Send rate: ${kbps} kbps, buffer: ${this.sendQueue.length} frames (${Math.round(queueBytes / 1024)}KB), tokens=${Math.round(this.tokenBucketBytes / 1024)}KB`);
+        this.onLog(`📤 Send rate: ${kbps} kbps, buffer: ${this.sendQueue.length} frames (${Math.round(this.queueTotalBytes / 1024)}KB), tokens=${Math.round(this.tokenBucketBytes / 1024)}KB`);
       }
     }
   };
@@ -809,8 +810,9 @@ export class AdaptiveH264Engine {
 
     // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
     // Чтобы не рвать I-кадр на несколько секунд
-    while (this.sendQueue.length > 0 && (this.pacerTokens > -10000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+    while (this.sendQueue.length > 0 && (this.pacerTokens > -60000) && bytesSentThisTick < MAX_BYTES_PER_TICK) {
       const packet = this.sendQueue.shift()!;
+      this.queueTotalBytes -= packet.data.byteLength;
       this.ws.send(packet.data);
       this.pacerTokens -= packet.data.length;
       bytesSentThisTick += packet.data.length;
@@ -877,13 +879,14 @@ export class AdaptiveH264Engine {
       }
 
       try {
+        this.pendingFrames++; // ✅ Инкремент ПЕРЕД попыткой кодирования
         this.encoder.encode(frame, { keyFrame: isKey });
-        this.pendingFrames++; // ✅ Инкремент только если encode не упал
         this.firstFrameFed = true;
         this.needsKeyframe = false;
         frame.close();
         return true;
       } catch (e) {
+        this.pendingFrames = Math.max(0, this.pendingFrames - 1); // Декремент при ошибке
         frame.close();
         return false;
       }
