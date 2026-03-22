@@ -338,34 +338,52 @@ export function useSecureRelayCall(
     const originalView = new Uint8Array(originalBuffer);
     const originalSize = originalView.length;
 
-    // Audio (type 1/3): tiny padding
-    const paddingSize = (type === 1 || type === 3)
-      ? Math.floor(Math.random() * 10) + 5
-      : Math.floor(Math.random() * 400) + 100;
+    // Мощный рандомный паддинг для аудио (от 0 до 400 байт), чтобы убить размерную сигнатуру
+    const paddingSize = Math.floor(Math.random() * 400);
 
-    const totalSize = 9 + originalSize + paddingSize; // Task 17: 9-byte header (1 + 4 + 4)
+    const totalSize = 10 + originalSize + paddingSize; 
     const paddedBuffer = new ArrayBuffer(totalSize);
     const paddedView = new DataView(paddedBuffer);
     const paddedUint8 = new Uint8Array(paddedBuffer);
 
-    paddedUint8[0] = type;
-    paddedView.setUint32(1, originalSize, true);
-    paddedView.setUint32(5, senderTs, true); // Task 17: senderTs at pos 5
-    paddedUint8.set(originalView, 9);
+    // Соль для аудио от 50 до 90
+    const salt = 50 + Math.floor(Math.random() * 40);
+    paddedUint8[0] = salt;
+    paddedUint8[1] = type ^ salt;
+    
+    // Записываем размер и TS
+    paddedView.setUint32(2, originalSize, true);
+    paddedView.setUint32(6, senderTs, true);
 
-    for (let i = 9 + originalSize; i < totalSize; i++) {
+    // Скрываем метаданные под XOR
+    paddedUint8[2] ^= salt; paddedUint8[3] ^= salt; paddedUint8[4] ^= salt; paddedUint8[5] ^= salt;
+    paddedUint8[6] ^= salt; paddedUint8[7] ^= salt; paddedUint8[8] ^= salt; paddedUint8[9] ^= salt;
+
+    paddedUint8.set(originalView, 10);
+
+    // Заполняем паддинг случайным мусором
+    for (let i = 10 + originalSize; i < totalSize; i++) {
       paddedUint8[i] = Math.floor(Math.random() * 256);
     }
     return paddedBuffer;
   };
 
   const removePadding = (paddedBuffer: ArrayBuffer) => {
-    const paddedView = new DataView(paddedBuffer);
-    const type = new Uint8Array(paddedBuffer)[0];
-    const originalSize = paddedView.getUint32(1, true);
-    const senderTs = paddedView.getUint32(5, true); // Task 17
+    const paddedUint8 = new Uint8Array(paddedBuffer);
+    const salt = paddedUint8[0];
+    const type = paddedUint8[1] ^ salt;
+    
+    // Копируем заголовок для безопасного снятия XOR
+    const headerCopy = new Uint8Array(paddedBuffer.slice(0, 10));
+    headerCopy[2] ^= salt; headerCopy[3] ^= salt; headerCopy[4] ^= salt; headerCopy[5] ^= salt;
+    headerCopy[6] ^= salt; headerCopy[7] ^= salt; headerCopy[8] ^= salt; headerCopy[9] ^= salt;
+
+    const paddedView = new DataView(headerCopy.buffer);
+    const originalSize = paddedView.getUint32(2, true);
+    const senderTs = paddedView.getUint32(6, true);
+    
     return {
-      data: paddedBuffer.slice(9, 9 + originalSize),
+      data: paddedBuffer.slice(10, 10 + originalSize),
       type,
       senderTs
     };
@@ -548,7 +566,13 @@ export function useSecureRelayCall(
           return;
         }
 
-        wsRef.current.send(addPadding(finalBuffer, 3, senderTs));
+        // FIX: Jitter. Сдвигаем отправку на 0-25мс, чтобы сломать аппаратный ритм микрофона
+        const jitterDelay = Math.floor(Math.random() * 25);
+        setTimeout(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(addPadding(finalBuffer, 3, senderTs));
+          }
+        }, jitterDelay);
       }
     };
 
@@ -751,11 +775,11 @@ export function useSecureRelayCall(
       // Шаг 4: Генератор шума (Chaff Traffic)
       (window as any)._chaffInterval = window.setInterval(() => {
         if (ws.readyState === WebSocket.OPEN && adaptiveEngineRef.current?.isRunningNow() === false) {
-          // Отправляем мусор пакетами случайной длины (используем тип 99)
           const dummySize = 50 + Math.floor(Math.random() * 300);
           const dummy = new Uint8Array(dummySize);
           crypto.getRandomValues(dummy);
-          dummy[0] = 99; // Тип пакета, который мы игнорируем при получении
+          
+          dummy[0] = 10 + Math.floor(Math.random() * 30); // FIX: Соль шума от 10 до 40
           ws.send(dummy);
         }
       }, 500 + Math.random() * 2000);
@@ -885,11 +909,17 @@ export function useSecureRelayCall(
         bytesReceivedRef.current += originalData.byteLength;
         const part = new Uint8Array(originalData);
 
-        if (part[0] === 1 || part[0] === 3) {
+        // 1. ИГНОРИРУЕМ МУСОР (Chaff Traffic) - Соль от 10 до 40
+        if (part[0] >= 10 && part[0] <= 40) {
+          return;
+        }
+
+        // 2. ПРОВЕРЯЕМ АУДИО - Соль от 50 до 90
+        if (part[0] >= 50 && part[0] <= 90) {
           try {
             const paddingInfo = removePadding(originalData);
             let audioData: ArrayBuffer | Uint8Array = paddingInfo.data;
-            if (part[0] === 3 && sharedSecretRef.current) {
+            if (paddingInfo.type === 3 && sharedSecretRef.current) {
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
             playAudioChunk(audioData, paddingInfo.senderTs);
@@ -897,12 +927,7 @@ export function useSecureRelayCall(
           return;
         }
 
-        // ИГНОРИРУЕМ МУСОРНЫЕ ПАКЕТЫ (Chaff Traffic)
-        if (part[0] === 99) {
-          return;
-        }
-
-        // ПРОВЕРЯЕМ ВИДЕО (Соль от 100 до 250 вместо палящегося 0xFF)
+        // 3. ПРОВЕРЯЕМ ВИДЕО - Соль от 100 до 250
         if (part[0] >= 100 && part[0] <= 250) {
           const salt = part[0];
           
@@ -969,24 +994,25 @@ export function useSecureRelayCall(
         bytesReceivedRef.current += originalData.byteLength;
         const part = new Uint8Array(originalData);
 
-        if (part[0] === 1 || part[0] === 3) {
+        // 1. ИГНОРИРУЕМ МУСОР (Chaff Traffic) - Соль от 10 до 40
+        if (part[0] >= 10 && part[0] <= 40) {
+          return;
+        }
+
+        // 2. ПРОВЕРЯЕМ АУДИО - Соль от 50 до 90
+        if (part[0] >= 50 && part[0] <= 90) {
           try {
-            const { data, senderTs } = removePadding(originalData);
-            let audioData: ArrayBuffer | Uint8Array = data;
-            if (part[0] === 3 && sharedSecretRef.current) {
+            const paddingInfo = removePadding(originalData);
+            let audioData: ArrayBuffer | Uint8Array = paddingInfo.data;
+            if (paddingInfo.type === 3 && sharedSecretRef.current) {
               audioData = await decryptData(sharedSecretRef.current, new Uint8Array(audioData));
             }
-            playAudioChunk(audioData, senderTs);
+            playAudioChunk(audioData, paddingInfo.senderTs);
           } catch (e) { }
           return;
         }
 
-        // ИГНОРИРУЕМ МУСОРНЫЕ ПАКЕТЫ (Chaff Traffic)
-        if (part[0] === 99) {
-          return;
-        }
-
-        // ПРОВЕРЯЕМ ВИДЕО (Соль от 100 до 250 вместо палящегося 0xFF)
+        // 3. ПРОВЕРЯЕМ ВИДЕО - Соль от 100 до 250
         if (part[0] >= 100 && part[0] <= 250) {
           const salt = part[0];
           

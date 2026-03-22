@@ -34,7 +34,7 @@ export async function obfuscateSplit(raw: Uint8Array, frameId: number = 0, sende
     part[8] = ((i >> 8) & 0xFF) ^ salt;
     part[9] = (partsCount & 0xFF) ^ salt;
     part[10] = ((partsCount >> 8) & 0xFF) ^ salt;
-    part[11] = paddingSize; // Сохраняем длину мусора для деобфускатора
+    part[11] = paddingSize ^ salt; // FIX: Теперь длина мусора тоже под XOR
     
     part.set(chunk, 12); // Вставляем полезную нагрузку (H.264)
     
@@ -52,7 +52,7 @@ export async function deobfuscateAssemble(chunks: Uint8Array[]): Promise<{ data:
     // Снимаем XOR и отрезаем паддинг
     const unxored = chunks.map(c => {
         const salt = c[0];
-        const padLen = c[11];
+        const padLen = c[11] ^ salt; // FIX: Снимаем XOR
         const frameId = (c[1] ^ salt) | ((c[2] ^ salt) << 8);
         const senderTs = ((c[3] ^ salt) | ((c[4] ^ salt) << 8) | ((c[5] ^ salt) << 16) | ((c[6] ^ salt) << 24)) >>> 0;
         const idx = (c[7] ^ salt) | ((c[8] ^ salt) << 8);
