@@ -398,13 +398,14 @@ export class AdaptiveH264Engine {
     if (isOveruse) {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
-        // СТАЛО: (Мягко спускаем скорость, если VPN захлебнулся)
-        let cutFactor = 0.9; 
-        if (this.lastSmoothedRtt > 1000) cutFactor = 0.75; 
-        if (this.lastSmoothedRtt > 1500) cutFactor = 0.50; 
-
-        this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
+        
+        let cutFactor = 0.9; // Базовое мягкое снижение (оставляем 90%)
+        if (this.lastSmoothedRtt > 1000) cutFactor = 0.75; // Оставляем 75%
+        if (this.lastSmoothedRtt > 1500) cutFactor = 0.50; // Оставляем 50%
+
+        // ✅ ИСПРАВЛЕНИЕ: Строгое умножение. Никаких (1.0 - cutFactor)
+        this.targetBitrate = Math.max(this.minBitrate, Math.floor(this.targetBitrate * cutFactor));
         stateChanged = true;
       }
     } else {
@@ -433,7 +434,7 @@ export class AdaptiveH264Engine {
       }
     }
 
-    // Жёсткое ограничение битрейта сверху
+    // ✅ ИСПРАВЛЕНИЕ: Жесткий лимит. Битрейт НИКОГДА не превысит maxBitrate (2.5 Мбит)
     this.targetBitrate = Math.min(this.targetBitrate, this.maxBitrate);
 
     if (Math.abs(this.targetBitrate - oldBitrate) > 5000 || stateChanged) {
