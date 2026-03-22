@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [showLogs, setShowLogs] = useState(false);
   const [friendCode, setFriendCode] = useState('');
   const [isAddingFriend, setIsAddingFriend] = useState(false);
+  const [showPostCallSummary, setShowPostCallSummary] = useState(false);
   
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -233,6 +234,7 @@ export default function Dashboard() {
     setIncomingCall(null);
     setActiveCallUserId(null);
     setActiveCallSocketId(null);
+    setShowPostCallSummary(true);
     
     setIsAudioMuted(false);
     setIsVideoMuted(false);
@@ -717,6 +719,7 @@ export default function Dashboard() {
       });
       setAndStoreLocalStream(stream);
       setCallActive(true);
+      setShowPostCallSummary(false);
       setAutoplayFailed(false);
       setActiveCallUserId(friendId);
       
@@ -791,6 +794,7 @@ export default function Dashboard() {
     // Cleanup any previous WebRTC state and media streams before answering
     cleanup();
     stopLocalStream();
+    setShowPostCallSummary(false);
 
     try {
       initAudioContexts();
@@ -1666,6 +1670,44 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* Post-Call Summary Modal */}
+      {showPostCallSummary && !callActive && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[110] p-4 backdrop-blur-md">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-zinc-900 p-8 rounded-3xl border border-zinc-800 text-center max-w-sm w-full shadow-2xl"
+          >
+            <div className="w-20 h-20 bg-emerald-500/10 rounded-full mx-auto mb-6 flex items-center justify-center">
+              <PhoneOff size={32} className="text-emerald-400" />
+            </div>
+            
+            <h3 className="text-2xl font-bold mb-2">Звонок завершён</h3>
+            <p className="text-zinc-400 mb-8 text-sm">Звонок был успешно завершён. Вы можете скачать технические логи для отладки.</p>
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => {
+                  downloadAllLogs();
+                  // setShowPostCallSummary(false); // Keep open to allow multiple downloads if needed, or close? User said "download and that's it" usually.
+                }}
+                className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 rounded-2xl flex items-center justify-center text-white font-bold transition-all shadow-lg shadow-emerald-500/20 gap-2"
+              >
+                <Download size={20} />
+                Скачать логи (.txt)
+              </button>
+              
+              <button 
+                onClick={() => setShowPostCallSummary(false)}
+                className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 rounded-2xl flex items-center justify-center text-zinc-300 font-semibold transition-colors"
+              >
+                Закрыть
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
