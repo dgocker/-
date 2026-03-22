@@ -108,6 +108,7 @@ export class AdaptiveH264Engine {
   private isConfigured: boolean = false;
 
   private aiState: 'steady' | 'hold' | 'congested' | 'recovery' = 'steady';
+  private processPromise: Promise<void> = Promise.resolve();
   private lastRttSmoothed: number = 0;
   private readonly SMOOTHING_ALPHA = 0.1;
 
@@ -229,8 +230,12 @@ export class AdaptiveH264Engine {
             if (this.onLog) this.onLog(`\u26A0\uFE0F Frame too large (${Math.round(data.length / 1024)}KB), dropping`);
             return;
           }
-          // Делегируем в отдельный метод, чтобы не блокировать поток энкодера
-          this.processEncodedFrame(data, startTime);
+          // Делегируем в строгую очередь промисов, чтобы кадры не обгоняли друг друга при асинхронном шифровании
+          this.processPromise = this.processPromise.then(() => 
+            this.processEncodedFrame(data, startTime).catch(e => {
+              if (this.onLog) this.onLog(`\u274C Process frame error: ${e}`);
+            })
+          );
         },
         error: (e) => {
           if (this.onLog) this.onLog(`❌ VideoEncoder error: ${e.message}`);
@@ -381,15 +386,6 @@ export class AdaptiveH264Engine {
     }
 
     const queueDelay = this.sendQueue.length > 0 ? now - this.sendQueue[0].enqueueTime : 0;
-
-    // FIX: Снижаем допустимый лимит буфера для штрафа до 16 КБ (защита от OS Bufferbloat)
-    const maxWsBuffer = Math.max(16384, (this.targetBitrate / 8) * 0.5);
-    const bufferPressure = Math.min(1.0, buffered / maxWsBuffer);
-    if (bufferPressure > 0.3) {
-      const penalty = (bufferPressure - 0.3) * 0.6;
-      this.targetBitrate *= (1.0 - penalty);
-      this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate);
-    }
 
     let stateChanged = false;
     const oldBitrate = this.targetBitrate;
@@ -850,12 +846,6 @@ export class AdaptiveH264Engine {
       // Синхронный контроль первого кадра
       if (!this.firstFrameFed) {
         this.needsKeyframe = true;
-      }
-
-      // Attempt 5: Increased encodeQueueSize limit for high-FPS support
-      if (this.encoder.encodeQueueSize > 10) {
-        frame.close();
-        return false;
       }
 
       const isKey = this.needsKeyframe || !this.firstFrameFed;
