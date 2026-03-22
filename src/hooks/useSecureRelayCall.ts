@@ -45,7 +45,6 @@ export function useSecureRelayCall(
   const remoteImgRef = useRef<HTMLImageElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
-  const chaffIntervalRef = useRef<number | null>(null);
   const lastAudioLogTimeRef = useRef<number>(0);
   const audioChunkCountRef = useRef<number>(0);
   const firstJpegReceivedRef = useRef<boolean>(false);
@@ -160,6 +159,8 @@ export function useSecureRelayCall(
 
   const startPing = (ws: WebSocket) => {
     if (pingIntervalRef.current) window.clearInterval(pingIntervalRef.current);
+    if ((window as any)._chaffInterval) window.clearInterval((window as any)._chaffInterval);
+    if (fragmentCleanupInterval.current) window.clearInterval(fragmentCleanupInterval.current);
     let pingCounter = 0;
     pingIntervalRef.current = window.setInterval(() => {
       const buffered = ws.bufferedAmount || 0;
@@ -224,24 +225,6 @@ export function useSecureRelayCall(
         return updated.length > 2000 ? updated.slice(updated.length - 2000) : updated;
       });
     }, 100); // 10 times a second for high-resolution logging
-  };
-
-  const startChaffTraffic = (ws: WebSocket) => {
-    if (chaffIntervalRef.current) window.clearInterval(chaffIntervalRef.current);
-    chaffIntervalRef.current = window.setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        // Если видео движок не работает или в очереди пусто — шлем шум
-        const isEngineActive = adaptiveEngineRef.current?.isRunningNow() || false;
-        
-        if (!isEngineActive) {
-          // Отправляем "шум" (type 99), имитирующий фоновую активность приложения
-          const dummySize = 50 + Math.floor(Math.random() * 150);
-          const dummy = new Uint8Array(dummySize);
-          crypto.getRandomValues(dummy);
-          ws.send(dummy);
-        }
-      }
-    }, 800 + Math.random() * 1200);
   };
 
   const applyRotation = useCallback((angle: number) => {
@@ -316,10 +299,6 @@ export function useSecureRelayCall(
     if (pingIntervalRef.current) {
       window.clearInterval(pingIntervalRef.current);
       pingIntervalRef.current = null;
-    }
-    if (chaffIntervalRef.current) {
-      window.clearInterval(chaffIntervalRef.current);
-      chaffIntervalRef.current = null;
     }
     if (orientationListenerRef.current) {
       window.removeEventListener('orientationchange', orientationListenerRef.current);
@@ -768,7 +747,18 @@ export function useSecureRelayCall(
 
       startRecording();
       startPing(ws);
-      startChaffTraffic(ws);
+
+      // Шаг 4: Генератор шума (Chaff Traffic)
+      (window as any)._chaffInterval = window.setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN && adaptiveEngineRef.current?.isRunningNow() === false) {
+          // Отправляем мусор пакетами случайной длины (используем тип 99)
+          const dummySize = 50 + Math.floor(Math.random() * 300);
+          const dummy = new Uint8Array(dummySize);
+          crypto.getRandomValues(dummy);
+          dummy[0] = 99; // Тип пакета, который мы игнорируем при получении
+          ws.send(dummy);
+        }
+      }, 500 + Math.random() * 2000);
 
       // Task 329: Interval-based cleanup for fragmented frames
       if (fragmentCleanupInterval.current) clearInterval(fragmentCleanupInterval.current);
@@ -907,10 +897,16 @@ export function useSecureRelayCall(
           return;
         }
 
-        const salt = part[0];
-        const isVideoPart = salt !== 1 && salt !== 3 && salt !== 99; // Игнорируем аудио и шум
+        // ИГНОРИРУЕМ МУСОРНЫЕ ПАКЕТЫ (Chaff Traffic)
+        if (part[0] === 99) {
+          return;
+        }
 
-        if (isVideoPart) {
+        // ПРОВЕРЯЕМ ВИДЕО (Соль от 100 до 250 вместо палящегося 0xFF)
+        if (part[0] >= 100 && part[0] <= 250) {
+          const salt = part[0];
+          
+          // Снимаем XOR чтобы узнать frameId и totalParts "на лету"
           const frameId = (part[1] ^ salt) | ((part[2] ^ salt) << 8);
           const totalParts = (part[9] ^ salt) | ((part[10] ^ salt) << 8);
           
@@ -920,9 +916,9 @@ export function useSecureRelayCall(
           }
           obfBufferRef.current[frameId].push(part);
 
-          if (obfBufferRef.current[frameId].length >= totalParts) {
+          if (obfBufferRef.current[frameId].length === totalParts) {
             if (frameId % 30 === 0) {
-              addLog(`💯 Video frame parts: frameId=${frameId}, total=${totalParts}, received=${obfBufferRef.current[frameId].length}`);
+              addLog(`💯 Video frame parts: frameId=${frameId}, total=${totalParts}, sender=${senderId}`);
             }
             const chunksToProcess = obfBufferRef.current[frameId];
             delete obfBufferRef.current[frameId];
@@ -985,10 +981,16 @@ export function useSecureRelayCall(
           return;
         }
 
-        const salt = part[0];
-        const isVideoPart = salt !== 1 && salt !== 3 && salt !== 99;
+        // ИГНОРИРУЕМ МУСОРНЫЕ ПАКЕТЫ (Chaff Traffic)
+        if (part[0] === 99) {
+          return;
+        }
 
-        if (isVideoPart) {
+        // ПРОВЕРЯЕМ ВИДЕО (Соль от 100 до 250 вместо палящегося 0xFF)
+        if (part[0] >= 100 && part[0] <= 250) {
+          const salt = part[0];
+          
+          // Снимаем XOR чтобы узнать frameId и totalParts "на лету"
           const frameId = (part[1] ^ salt) | ((part[2] ^ salt) << 8);
           const totalParts = (part[9] ^ salt) | ((part[10] ^ salt) << 8);
           
@@ -998,7 +1000,7 @@ export function useSecureRelayCall(
           }
           obfBufferRef.current[frameId].push(part);
 
-          if (obfBufferRef.current[frameId].length >= totalParts) {
+          if (obfBufferRef.current[frameId].length === totalParts) {
             if (frameId % 30 === 0) {
               addLog(`💯 Video frame parts (Blob): frameId=${frameId}, total=${totalParts}, sender=${senderId}`);
             }

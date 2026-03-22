@@ -134,7 +134,6 @@ export class AdaptiveH264Engine {
   private sendQueue: { data: Uint8Array; enqueueTime: number }[] = [];
   private frameId: number = 0;
   private timerId: any = null; // Support for setInterval
-  private pacerTimeout: any = null; // Support for jittered setTimeout
   private droppedFrames: number = 0;
   private droppedFramesWindow: number = 0;
   private droppedFramesRate: number = 0;
@@ -575,8 +574,13 @@ export class AdaptiveH264Engine {
       this.loop().catch(() => { });
     }, 1000 / 30); // Target 30fps baseline
 
-    // Рандомизированный запуск Пейсера (Anti-DPI Jittering)
-    this.schedulePacer();
+    // (Рекурсивный таймаут для джиттеринга 10-35мс)
+    const pacerLoop = () => {
+      if (!this.isRunning) return;
+      this.runPacer();
+      this.pacerInterval = setTimeout(pacerLoop, 10 + Math.random() * 25);
+    };
+    pacerLoop();
     this.lastAIUpdate = now;
     this.lastTokenUpdate = now;
     this.lastCongestionTs = 0;
@@ -594,10 +598,8 @@ export class AdaptiveH264Engine {
       clearInterval(this.timerId);
       this.timerId = null;
     }
-    if (this.pacerTimeout) {
-      clearTimeout(this.pacerTimeout);
-      this.pacerTimeout = null;
-    }
+    if (this.pacerInterval) clearTimeout(this.pacerInterval);
+    this.pacerInterval = null;
 
     // Reset ABR and PI controller state
     this.errorIntegral = 0;
@@ -617,12 +619,6 @@ export class AdaptiveH264Engine {
       this.isConfigured = false;
     }
     this.firstFrameFed = false;
-  }
-
-  private schedulePacer() {
-    if (!this.isRunning) return;
-    const nextInterval = 10 + Math.floor(Math.random() * 25);
-    this.pacerTimeout = setTimeout(() => this.runPacer(), nextInterval);
   }
 
   public isRunningNow() {
@@ -763,55 +759,49 @@ export class AdaptiveH264Engine {
   };
 
   private runPacer() {
-    if (!this.isRunning) return;
-    
     const now = performance.now();
     if (this.lastPacerTick === 0) this.lastPacerTick = now;
     const deltaMs = now - this.lastPacerTick;
     this.lastPacerTick = now;
 
-    if (deltaMs > 0) {
-      const bytesPerMs = (this.targetBitrate / 8) / 1000;
-      let currentBytesPerMs = bytesPerMs;
+    if (deltaMs <= 0) return;
 
-      // 🚀 АНТИ-УДУШЬЕ (Dynamic Boost)
-      if (this.sendQueue.length > 20) currentBytesPerMs = bytesPerMs * 1.5;
-      if (this.sendQueue.length > 50) currentBytesPerMs = bytesPerMs * 3.0;
-      if (this.sendQueue.length > 100) currentBytesPerMs = bytesPerMs * 5.0;
+    const bytesPerMs = (this.targetBitrate / 8) / 1000;
+    let currentBytesPerMs = bytesPerMs;
 
-      // ПРЕДОХРАНИТЕЛЬ: Не позволяем пейсеру слать быстрее 7 Мбит/с (875 байт/мс)
-      currentBytesPerMs = Math.min(currentBytesPerMs, 875); 
+    // 🚀 АНТИ-УДУШЬЕ СОХРАНЕНО (Dynamic Boost)
+    if (this.sendQueue.length > 20) currentBytesPerMs = bytesPerMs * 1.5;
+    if (this.sendQueue.length > 50) currentBytesPerMs = bytesPerMs * 3.0;
+    if (this.sendQueue.length > 100) currentBytesPerMs = bytesPerMs * 5.0;
 
-      const tokensPerTick = currentBytesPerMs * deltaMs;
-      this.pacerTokens += tokensPerTick;
+    const tokensPerTick = currentBytesPerMs * deltaMs;
+    this.pacerTokens += tokensPerTick;
 
-      // Лимиты с учетом текущего форсажа и рандомизации (Anti-DPI Burst Size)
-      const maxPacerBurst = Math.max(15000, currentBytesPerMs * (30 + Math.random() * 20));
-      const maxPacerDebt = -100000; 
+    const maxPacerBurst = Math.max(15000, currentBytesPerMs * 40);
+    const maxPacerDebt = -3000;
 
-      if (this.pacerTokens > maxPacerBurst) {
-        this.pacerTokens = maxPacerBurst;
-      }
-
-      let bytesSentThisTick = 0;
-      // Рандомизируем максимальный объем данных за один тик (100-160 КБ)
-      const MAX_BYTES_PER_TICK = 102400 + Math.floor(Math.random() * 61440);
-
-      while (this.sendQueue.length > 0 && this.pacerTokens > 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
-        const packet = this.sendQueue.shift()!;
-        this.ws.send(packet.data);
-        this.pacerTokens -= packet.data.length;
-        bytesSentThisTick += packet.data.length;
-        this.bytesSentThisSecond += packet.data.length; 
-      }
-
-      if (this.pacerTokens < maxPacerDebt) {
-        this.pacerTokens = maxPacerDebt;
-      }
+    if (this.pacerTokens > maxPacerBurst) {
+      this.pacerTokens = maxPacerBurst;
     }
 
-    // Планируем следующий запуск с джиттером
-    this.schedulePacer();
+    let bytesSentThisTick = 0;
+    
+    // 🎲 Burst Randomization: Рандомизируем размер отправки за такт, но в рамках доступных токенов
+    const MAX_BYTES_PER_TICK = 32000 + Math.floor(Math.random() * 64000);
+
+    while (this.sendQueue.length > 0 && this.pacerTokens > 0 && bytesSentThisTick < MAX_BYTES_PER_TICK) {
+      const packet = this.sendQueue.shift()!;
+      this.ws.send(packet.data);
+      this.pacerTokens -= packet.data.length;
+      bytesSentThisTick += packet.data.length;
+      
+      // Не забываем счетчик для логов
+      this.bytesSentThisSecond += packet.data.length;
+    }
+
+    if (this.pacerTokens < maxPacerDebt) {
+      this.pacerTokens = maxPacerDebt;
+    }
   }
 
   private async processFrame(now: number): Promise<boolean> {
