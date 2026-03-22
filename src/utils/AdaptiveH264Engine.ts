@@ -219,12 +219,17 @@ export class AdaptiveH264Engine {
       this.encoder = new VideoEncoder({
         output: (chunk, metadata) => {
           const startTime = performance.now();
+          
+          // ✅ ПРАВКА 1: Уменьшаем pendingFrames СРАЗУ! 
+          // Кодек свою работу сделал, он не виноват, если дальше шифрование займет время.
+          this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
           // Task 17 Refined: Don't drop large I-frames. Raised to 1.5MB for 1080p high-quality.
           if (data.length > 1500000) {
             if (this.onLog) this.onLog(`\u26A0\uFE0F Frame too large (${Math.round(data.length / 1024)}KB), dropping`);
-            this.pendingFrames = Math.max(0, this.pendingFrames - 1);
+            // Здесь больше не нужен this.pendingFrames--, мы сделали это выше
             return;
           }
           // Делегируем в отдельный метод, чтобы не блокировать поток энкодера
@@ -250,7 +255,6 @@ export class AdaptiveH264Engine {
       this.needsKeyframe = true;
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.4);
       this.applyBitrateToParams();
-      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
       return;
     }
 
@@ -282,8 +286,6 @@ export class AdaptiveH264Engine {
 
     } catch (e) {
       if (this.onLog) this.onLog(`❌ VideoEncoder output processing error: ${e}`);
-    } finally {
-      this.pendingFrames = Math.max(0, this.pendingFrames - 1);
     }
   }
 
@@ -454,9 +456,9 @@ export class AdaptiveH264Engine {
     const now = performance.now();
     this.lastRtt = rtt;
 
-    // Экстренный тормоз: доверяем RTT. Если пинг > 1200мс.
+    // Экстренный тормоз: доверяем RTT. Если пинг > 2500мс.
     // FIX: Режем только на 25% (0.75), так как на скоростном интернете это чаще всего временный Bufferbloat от наших же данных, а не смерть сети.
-    if (rtt > 1200 && now - this.lastCongestionTs > 500) {
+    if (rtt > 2500 && now - this.lastCongestionTs > 500) {
       this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * 0.75);
       // FIX: На время жесткой паники запрещаем Pacer-у слать что-либо, но без глубоких минусов.
       this.pacerTokens = Math.max(-5000, this.pacerTokens);
@@ -495,9 +497,9 @@ export class AdaptiveH264Engine {
   public updateRemoteJitter(jitter: number) {
     this.lastRemoteJitter = jitter;
 
-    // Если пакеты начали приходить неравномерно (jitter > 600мс),
+    // Если пакеты начали приходить неравномерно (jitter > 1500мс),
     // значит буферы маршрутизаторов переполняются, скоро начнется дроп пакетов.
-    if (jitter > 600 && this.aiState !== 'congested') {
+    if (jitter > 1500 && this.aiState !== 'congested') {
       if (this.onLog) this.onLog(`⚠️ Высокий Jitter (${Math.round(jitter)}ms): превентивное снижение битрейта`);
 
       this.aiState = 'congested';
