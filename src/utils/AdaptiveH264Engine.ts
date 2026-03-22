@@ -276,6 +276,15 @@ export class AdaptiveH264Engine {
 
       const senderTs = Math.floor(performance.now() - this.sessionStartTime);
       const parts = await obfuscateSplit(finalData, this.frameId++, senderTs);
+
+      // ✅ Level 13.1: Emergency Pruning (Безопасный порог 800 фрагментов)
+      if (this.sendQueue.length > 800) {
+        this.sendQueue = [];
+        this.queueTotalBytes = 0;
+        this.needsKeyframe = true;
+        if (this.onLog) this.onLog(`🚨 Emergency Pruning: 800+ fragments dropped to recover latency`);
+      }
+
       for (const part of parts) {
         this.sendQueue.push({
           data: new Uint8Array(part),
@@ -838,7 +847,8 @@ export class AdaptiveH264Engine {
       this.onLog(`🎬 processFrame: eqSize=${this.encoder?.encodeQueueSize || 0}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    if ((this.encoder && this.encoder.encodeQueueSize > 15) || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
+    // Level 13.1: Строгий лимит (8), чтобы опередить Watchdog (10)
+    if ((this.encoder && this.encoder.encodeQueueSize > 8) || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       return false;
     }
     if (!this.encoder) {
