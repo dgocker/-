@@ -395,17 +395,17 @@ export class AdaptiveH264Engine {
     const oldBitrate = this.targetBitrate;
 
     const isBufferGrowing = this.bufferedGradient > 0.5 && buffered > 50000;
-    // Phase 4: Aggressive protection for slow devices. Trigger at 600ms.
-    const isHighRtt = this.lastSmoothedRtt > 600;
+    // Phase 5: Mobile-optimized RTT thresholds. 700ms is normal for 4G.
+    const isHighRtt = this.lastSmoothedRtt > 700;
     const isOveruse = this.delayTrend > 25 || isBufferGrowing || isHighRtt;
 
     if (isOveruse) {
       if (this.aiState !== 'congested' || now - this.lastCongestionTs > 300) {
         this.aiState = 'congested';
-        // Dynamic cut factor: Aggressive rescue for slow peers
+        // Dynamic cut factor: Realistic mobile thresholds
         let cutFactor = 0.85;
-        if (this.lastSmoothedRtt > 600) cutFactor = 0.5; // Сразу режем битрейт в 2 раза при скачке пинга!
-        if (this.lastSmoothedRtt > 1000) cutFactor = 0.25; // Режем в 4 раза при жестком заторе!
+        if (this.lastSmoothedRtt > 1000) cutFactor = 0.5; // Сдвигаем на 1000мс
+        if (this.lastSmoothedRtt > 1500) cutFactor = 0.25; // Сдвигаем на 1500мс
 
         this.targetBitrate = Math.max(this.minBitrate, this.targetBitrate * cutFactor);
         this.lastCongestionTs = now;
@@ -667,7 +667,8 @@ export class AdaptiveH264Engine {
 
     // Watchdog for pending frames to prevent permanent freeze (ИЗ ТЕСТА)
     // Watchdog for encoder freeze using native encodeQueueSize
-    if (this.encoder && this.encoder.encodeQueueSize > 15 && now - this.lastPendingReset > 1500) {
+    // Watchdog for encoder freeze using native encodeQueueSize (Level 8: 25 frames)
+    if (this.encoder && this.encoder.encodeQueueSize > 25 && now - this.lastPendingReset > 1500) {
       if (this.onLog) this.onLog(`🚨 Watchdog: Encoder internal queue stuck (${this.encoder.encodeQueueSize}). Force resetting...`);
       this.handleEncoderError();
       this.lastPendingReset = now;
@@ -797,8 +798,8 @@ export class AdaptiveH264Engine {
 
     let bytesSentThisTick = 0;
 
-    // 🎲 Burst Randomization: Мелкие порции (6-12 КБ), чтобы не забивать сокет и не убивать RTT
-    const MAX_BYTES_PER_TICK = 6000 + Math.floor(Math.random() * 6000);
+    // 🎲 Burst Randomization: Расширенный лимит (16-24 КБ) для пропуска битрейта до 4-5 Мбит/с
+    const MAX_BYTES_PER_TICK = 16000 + Math.floor(Math.random() * 8000);
 
     // Разрешаем слать, если токены > 0 ИЛИ если мы уже начали слать части одного кадра
     // Чтобы не рвать I-кадр на несколько секунд
@@ -823,7 +824,7 @@ export class AdaptiveH264Engine {
       this.onLog(`🎬 processFrame: eqSize=${this.encoder?.encodeQueueSize || 0}, queue=${this.sendQueue.length}, state=${this.aiState}`);
     }
 
-    if ((this.encoder && this.encoder.encodeQueueSize > 5) || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
+    if ((this.encoder && this.encoder.encodeQueueSize > 15) || this.video.paused || this.video.ended || this.video.readyState < 3 || this.video.videoWidth === 0) {
       return false;
     }
     if (!this.encoder) {
